@@ -50,6 +50,28 @@
     return best;
   };
 
+  const pickScrollableAncestor = (startEl, limitContainer) => {
+    let el = startEl;
+    let best = null;
+    let bestDelta = 0;
+    while (el && el !== document.documentElement) {
+      if (limitContainer && !limitContainer.contains(el)) break;
+      if (el instanceof Element) {
+        const cs = window.getComputedStyle(el);
+        const delta = el.scrollHeight - el.clientHeight;
+        if (
+          (cs.overflowY === "auto" || cs.overflowY === "scroll") &&
+          delta > bestDelta + 2
+        ) {
+          best = el;
+          bestDelta = delta;
+        }
+      }
+      el = el.parentElement;
+    }
+    return best;
+  };
+
   const ensureControls = () => {
     let wrap = document.getElementById("dialog-scroll-controls");
     if (!wrap) {
@@ -106,12 +128,15 @@
       wrap.__target = null;
       return;
     }
-    const target = pickScrollTarget(dialog);
     const pageTarget = document.scrollingElement || document.documentElement;
     const pageScrollable = pageTarget.scrollHeight > pageTarget.clientHeight + 2;
 
-    const finalTarget =
-      target && target.scrollHeight > target.clientHeight + 2 ? target : pageScrollable ? pageTarget : null;
+    const active = document.activeElement;
+    const activeTarget =
+      active && active instanceof Element ? pickScrollableAncestor(active, dialog) : null;
+    const dialogTarget = pickScrollTarget(dialog);
+
+    const finalTarget = activeTarget || dialogTarget || null;
 
     if (!finalTarget) {
       wrap.style.display = "none";
