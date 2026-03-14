@@ -33,7 +33,7 @@
     const consider = (el) => {
       if (!el) return;
       const cs = window.getComputedStyle(el);
-      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") return;
+      if (cs.overflowY === "hidden" || cs.overflowY === "clip") return;
       const delta = el.scrollHeight - el.clientHeight;
       if (delta > bestDelta + 2) {
         best = el;
@@ -60,7 +60,8 @@
         const cs = window.getComputedStyle(el);
         const delta = el.scrollHeight - el.clientHeight;
         if (
-          (cs.overflowY === "auto" || cs.overflowY === "scroll") &&
+          cs.overflowY !== "hidden" &&
+          cs.overflowY !== "clip" &&
           delta > bestDelta + 2
         ) {
           best = el;
@@ -97,6 +98,15 @@
       wrap.__down = down;
     }
     return wrap;
+  };
+
+  const setEnabled = (wrap, enabled) => {
+    wrap.__up.disabled = !enabled;
+    wrap.__down.disabled = !enabled;
+    wrap.__up.style.opacity = enabled ? "1" : "0.45";
+    wrap.__down.style.opacity = enabled ? "1" : "0.45";
+    wrap.__up.style.pointerEvents = enabled ? "auto" : "none";
+    wrap.__down.style.pointerEvents = enabled ? "auto" : "none";
   };
 
   const update = () => {
@@ -136,11 +146,11 @@
       active && active instanceof Element ? pickScrollableAncestor(active, dialog) : null;
     const dialogTarget = pickScrollTarget(dialog);
 
-    const finalTarget = activeTarget || dialogTarget || null;
+    const finalTarget = activeTarget || dialogTarget || wrap.__lastTarget || null;
 
     if (!finalTarget) {
-      wrap.style.display = "none";
-      wrap.__target = null;
+      wrap.style.display = "flex";
+      setEnabled(wrap, false);
       if (!wrap.__retry) {
         wrap.__retry = setTimeout(() => {
           wrap.__retry = null;
@@ -161,6 +171,7 @@
       };
     }
     wrap.style.display = "flex";
+    setEnabled(wrap, true);
   };
 
   const start = () => {
@@ -168,6 +179,23 @@
     const mo = new MutationObserver(() => update());
     mo.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener("resize", update);
+    document.addEventListener(
+      "wheel",
+      (e) => {
+        const wrap = document.getElementById("dialog-scroll-controls");
+        if (!wrap) return;
+        const target = e.target instanceof Element ? e.target : null;
+        if (!target) return;
+        const dialogs = Array.from(
+          document.querySelectorAll('[data-slot="dialog-content"], [role="dialog"]')
+        ).filter(isVisible);
+        const dialog = dialogs.length ? dialogs[dialogs.length - 1] : null;
+        if (!dialog || !dialog.contains(target)) return;
+        const t = pickScrollableAncestor(target, dialog);
+        if (t) wrap.__lastTarget = t;
+      },
+      { passive: true, capture: true }
+    );
   };
 
   if (document.readyState === "loading") {
