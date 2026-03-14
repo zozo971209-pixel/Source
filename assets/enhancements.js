@@ -19,54 +19,93 @@
     return btn;
   };
 
-  const ensureScrollControls = (dialogContent) => {
-    if (!dialogContent || dialogContent.__scrollControlsMounted) return;
-
-    const scrollTarget =
-      dialogContent.querySelector(".overflow-y-auto") ||
-      dialogContent.querySelector("[style*=\"overflow-y\"]") ||
-      dialogContent;
-
-    const wrap = document.createElement("div");
-    wrap.style.position = "absolute";
-    wrap.style.right = "10px";
-    wrap.style.top = "70px";
-    wrap.style.zIndex = "20";
-    wrap.style.display = "flex";
-    wrap.style.flexDirection = "column";
-    wrap.style.gap = "10px";
-
-    const up = createButton("▲");
-    const down = createButton("▼");
-
-    up.addEventListener("click", (e) => {
-      e.preventDefault();
-      scrollTarget.scrollBy({ top: -SCROLL_STEP, behavior: "smooth" });
-    });
-    down.addEventListener("click", (e) => {
-      e.preventDefault();
-      scrollTarget.scrollBy({ top: SCROLL_STEP, behavior: "smooth" });
-    });
-
-    wrap.appendChild(up);
-    wrap.appendChild(down);
-
-    const computed = window.getComputedStyle(dialogContent);
-    if (computed.position === "static") dialogContent.style.position = "relative";
-    dialogContent.appendChild(wrap);
-    dialogContent.__scrollControlsMounted = true;
+  const isVisible = (el) => {
+    if (!el) return false;
+    if (el.offsetParent !== null) return true;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
   };
 
-  const scan = () => {
-    document
-      .querySelectorAll('[data-slot="dialog-content"], .max-w-lg, .max-w-md')
-      .forEach((el) => ensureScrollControls(el));
+  const pickScrollTarget = (dialogContent) => {
+    const candidates = [
+      ...dialogContent.querySelectorAll(".overflow-y-auto"),
+      ...dialogContent.querySelectorAll('[style*="overflow-y"]'),
+    ];
+    for (const el of candidates) {
+      const cs = window.getComputedStyle(el);
+      if (
+        (cs.overflowY === "auto" || cs.overflowY === "scroll") &&
+        el.scrollHeight > el.clientHeight + 2
+      ) {
+        return el;
+      }
+    }
+    return dialogContent;
+  };
+
+  const ensureControls = () => {
+    let wrap = document.getElementById("dialog-scroll-controls");
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = "dialog-scroll-controls";
+      wrap.style.position = "fixed";
+      wrap.style.right = "16px";
+      wrap.style.top = "50%";
+      wrap.style.transform = "translateY(-50%)";
+      wrap.style.zIndex = "9999";
+      wrap.style.display = "none";
+      wrap.style.flexDirection = "column";
+      wrap.style.gap = "10px";
+
+      const up = createButton("▲");
+      const down = createButton("▼");
+
+      wrap.appendChild(up);
+      wrap.appendChild(down);
+      document.body.appendChild(wrap);
+
+      wrap.__up = up;
+      wrap.__down = down;
+    }
+    return wrap;
+  };
+
+  const update = () => {
+    const wrap = ensureControls();
+    const dialogs = Array.from(
+      document.querySelectorAll('[data-slot="dialog-content"]')
+    ).filter(isVisible);
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) {
+      wrap.style.display = "none";
+      wrap.__target = null;
+      return;
+    }
+    const target = pickScrollTarget(dialog);
+    if (!target || target.scrollHeight <= target.clientHeight + 2) {
+      wrap.style.display = "none";
+      wrap.__target = null;
+      return;
+    }
+    if (wrap.__target !== target) {
+      wrap.__target = target;
+      wrap.__up.onclick = (e) => {
+        e.preventDefault();
+        target.scrollBy({ top: -SCROLL_STEP, behavior: "smooth" });
+      };
+      wrap.__down.onclick = (e) => {
+        e.preventDefault();
+        target.scrollBy({ top: SCROLL_STEP, behavior: "smooth" });
+      };
+    }
+    wrap.style.display = "flex";
   };
 
   const start = () => {
-    scan();
-    const mo = new MutationObserver(() => scan());
+    update();
+    const mo = new MutationObserver(() => update());
     mo.observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener("resize", update);
   };
 
   if (document.readyState === "loading") {

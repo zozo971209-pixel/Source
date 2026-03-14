@@ -30,9 +30,20 @@
     <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260314-5"></script>
-    <script defer src="./assets/enhancements.js?v=20260314-5"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260314-5">
+    <script>
+      (function () {
+        try {
+          var to = sessionStorage.getItem("spa_redirect");
+          if (to) {
+            sessionStorage.removeItem("spa_redirect");
+            history.replaceState(null, "", to);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260314-7"></script>
+    <script defer src="./assets/enhancements.js?v=20260314-7"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260314-7">
   </head>
   <body>
     <div id="root"></div>
