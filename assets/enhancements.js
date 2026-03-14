@@ -146,7 +146,7 @@
       active && active instanceof Element ? pickScrollableAncestor(active, dialog) : null;
     const dialogTarget = pickScrollTarget(dialog);
 
-    const finalTarget = activeTarget || dialogTarget || wrap.__lastTarget || null;
+    const finalTarget = wrap.__lastTarget || activeTarget || dialogTarget || null;
 
     if (!finalTarget) {
       wrap.style.display = "flex";
@@ -191,8 +191,44 @@
         ).filter(isVisible);
         const dialog = dialogs.length ? dialogs[dialogs.length - 1] : null;
         if (!dialog || !dialog.contains(target)) return;
-        const t = pickScrollableAncestor(target, dialog);
-        if (t) wrap.__lastTarget = t;
+
+        const chain = [];
+        let el = target;
+        while (el && el !== document.documentElement) {
+          if (!dialog.contains(el)) break;
+          chain.push(el);
+          el = el.parentElement;
+        }
+        chain.push(dialog);
+
+        const before = new Map();
+        for (const node of chain) {
+          if (!(node instanceof Element)) continue;
+          before.set(node, node.scrollTop);
+        }
+
+        requestAnimationFrame(() => {
+          let changed = null;
+          for (const node of chain) {
+            if (!(node instanceof Element)) continue;
+            const prev = before.get(node);
+            if (prev === void 0) continue;
+            if (node.scrollTop !== prev) {
+              changed = node;
+              break;
+            }
+          }
+
+          if (!changed) {
+            const fallback = pickScrollableAncestor(target, dialog) || pickScrollTarget(dialog);
+            if (fallback) changed = fallback;
+          }
+
+          if (changed) {
+            wrap.__lastTarget = changed;
+            update();
+          }
+        });
       },
       { passive: true, capture: true }
     );
