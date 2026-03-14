@@ -39,11 +39,20 @@
             history.replaceState(null, "", to);
           }
         } catch (e) {}
+        try {
+          var oldLikes = localStorage.getItem("likedTheories");
+          var oldBookmarks = localStorage.getItem("bookmarkedTheories");
+          var likes = localStorage.getItem("likes");
+          var bookmarks = localStorage.getItem("bookmarks");
+          if (oldLikes && (!likes || likes === "[]")) localStorage.setItem("likes", oldLikes);
+          if (oldBookmarks && (!bookmarks || bookmarks === "[]"))
+            localStorage.setItem("bookmarks", oldBookmarks);
+        } catch (e) {}
       })();
     </script>
-    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260314-7"></script>
-    <script defer src="./assets/enhancements.js?v=20260314-7"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260314-7">
+    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260314-8"></script>
+    <script defer src="./assets/enhancements.js?v=20260314-8"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260314-8">
   </head>
   <body>
     <div id="root"></div>
