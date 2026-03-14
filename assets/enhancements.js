@@ -27,20 +27,27 @@
   };
 
   const pickScrollTarget = (dialogContent) => {
-    const candidates = [
-      ...dialogContent.querySelectorAll(".overflow-y-auto"),
-      ...dialogContent.querySelectorAll('[style*="overflow-y"]'),
-    ];
-    for (const el of candidates) {
+    let best = null;
+    let bestDelta = 0;
+
+    const consider = (el) => {
+      if (!el) return;
       const cs = window.getComputedStyle(el);
-      if (
-        (cs.overflowY === "auto" || cs.overflowY === "scroll") &&
-        el.scrollHeight > el.clientHeight + 2
-      ) {
-        return el;
+      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") return;
+      const delta = el.scrollHeight - el.clientHeight;
+      if (delta > bestDelta + 2) {
+        best = el;
+        bestDelta = delta;
       }
-    }
-    return dialogContent;
+    };
+
+    consider(dialogContent);
+
+    dialogContent
+      .querySelectorAll(".overflow-y-auto, .overflow-auto, [style*=\"overflow\"], *")
+      .forEach((el) => consider(el));
+
+    return best;
   };
 
   const ensureControls = () => {
@@ -82,6 +89,9 @@
     document
       .querySelectorAll('[class*="max-h-"][class*="overflow-y-auto"]')
       .forEach((el) => candidates.add(el));
+    document
+      .querySelectorAll('[class*="max-h-"][class*="overflow-auto"]')
+      .forEach((el) => candidates.add(el));
 
     const dialogs = Array.from(candidates).filter(isVisible);
     const dialog = dialogs.reduce((best, el) => {
@@ -97,7 +107,13 @@
       return;
     }
     const target = pickScrollTarget(dialog);
-    if (!target || target.scrollHeight <= target.clientHeight + 2) {
+    const pageTarget = document.scrollingElement || document.documentElement;
+    const pageScrollable = pageTarget.scrollHeight > pageTarget.clientHeight + 2;
+
+    const finalTarget =
+      target && target.scrollHeight > target.clientHeight + 2 ? target : pageScrollable ? pageTarget : null;
+
+    if (!finalTarget) {
       wrap.style.display = "none";
       wrap.__target = null;
       if (!wrap.__retry) {
@@ -108,15 +124,15 @@
       }
       return;
     }
-    if (wrap.__target !== target) {
-      wrap.__target = target;
+    if (wrap.__target !== finalTarget) {
+      wrap.__target = finalTarget;
       wrap.__up.onclick = (e) => {
         e.preventDefault();
-        target.scrollBy({ top: -SCROLL_STEP, behavior: "smooth" });
+        finalTarget.scrollBy({ top: -SCROLL_STEP, behavior: "smooth" });
       };
       wrap.__down.onclick = (e) => {
         e.preventDefault();
-        target.scrollBy({ top: SCROLL_STEP, behavior: "smooth" });
+        finalTarget.scrollBy({ top: SCROLL_STEP, behavior: "smooth" });
       };
     }
     wrap.style.display = "flex";
