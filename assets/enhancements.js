@@ -72,10 +72,25 @@
 
   const update = () => {
     const wrap = ensureControls();
-    const dialogs = Array.from(
-      document.querySelectorAll('[data-slot="dialog-content"]')
-    ).filter(isVisible);
-    const dialog = dialogs[dialogs.length - 1];
+    const candidates = new Set();
+    document
+      .querySelectorAll('[data-slot="dialog-content"], [role="dialog"]')
+      .forEach((el) => candidates.add(el));
+    document
+      .querySelectorAll('[class*="max-h-"][class*="overflow-hidden"]')
+      .forEach((el) => candidates.add(el));
+    document
+      .querySelectorAll('[class*="max-h-"][class*="overflow-y-auto"]')
+      .forEach((el) => candidates.add(el));
+
+    const dialogs = Array.from(candidates).filter(isVisible);
+    const dialog = dialogs.reduce((best, el) => {
+      const zb = best ? parseInt(getComputedStyle(best).zIndex || "0", 10) : -1;
+      const ze = parseInt(getComputedStyle(el).zIndex || "0", 10);
+      if (!best) return el;
+      if (Number.isFinite(ze) && Number.isFinite(zb) && ze !== zb) return ze > zb ? el : best;
+      return el;
+    }, null);
     if (!dialog) {
       wrap.style.display = "none";
       wrap.__target = null;
@@ -85,6 +100,12 @@
     if (!target || target.scrollHeight <= target.clientHeight + 2) {
       wrap.style.display = "none";
       wrap.__target = null;
+      if (!wrap.__retry) {
+        wrap.__retry = setTimeout(() => {
+          wrap.__retry = null;
+          update();
+        }, 120);
+      }
       return;
     }
     if (wrap.__target !== target) {
