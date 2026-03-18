@@ -179,8 +179,38 @@
         const t = setInterval(() => { if (window.supabase && window.supabase.createClient) { clearInterval(t); r(); } }, 50);
         setTimeout(() => { clearInterval(t); r(); }, 5000);
       });
-      sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true } });
-      const { data: { session } } = await sb.auth.getSession();
+      // 使用與 index.html 完全相同的設定，確保 session 共享
+      sb = window.supabase.createClient(SB_URL, SB_KEY, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          storageKey: 'sb-grccrtpbshfycqicqtyn-auth-token'
+        }
+      });
+
+      // 等待 session 初始化（最多 3 秒）
+      let session = null;
+      for (let i = 0; i < 6; i++) {
+        const { data } = await sb.auth.getSession();
+        if (data && data.session) { session = data.session; break; }
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      if (!session) {
+        // Fallback：嘗試從 localStorage 讀取 Supabase session
+        const keys = Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-'));
+        for (const key of keys) {
+          try {
+            const val = JSON.parse(localStorage.getItem(key));
+            if (val && val.access_token && val.user) {
+              const { data, error } = await sb.auth.setSession({ access_token: val.access_token, refresh_token: val.refresh_token });
+              if (!error && data.session) { session = data.session; break; }
+            }
+          } catch(e) {}
+        }
+      }
+
       if (!session) { document.getElementById('not-logged-in').style.display = 'block'; return; }
       user = session.user;
       document.getElementById('profile-content').style.display = 'block';

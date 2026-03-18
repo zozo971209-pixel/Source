@@ -30,7 +30,8 @@
             auth: {
               persistSession: true,
               autoRefreshToken: true,
-              detectSessionInUrl: true
+              detectSessionInUrl: true,
+              storageKey: 'sb-grccrtpbshfycqicqtyn-auth-token'
             }
           });
           window.supabaseClient = client;

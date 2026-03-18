@@ -42,7 +42,12 @@
         function tryInit() {
           if (window.supabase && window.supabase.createClient && !window.supabaseClient) {
             window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-              auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+              auth: {
+                persistSession: true,
+                autoRefreshToken: true,
+                detectSessionInUrl: true,
+                storageKey: 'sb-grccrtpbshfycqicqtyn-auth-token'
+              }
             });
             return true;
           }
@@ -92,12 +97,15 @@
     <style>
       /* 強制隱藏 React IssueReportButton（fixed bottom-6 right-6 z-40）*/
       .fixed.bottom-6.right-6 { display: none !important; }
+      /* 強制隱藏 Navbar 中的用戶下拉選單（data-slot=dropdown-menu）*/
+      [data-slot="dropdown-menu"] { display: none !important; }
+      /* 強制隱藏 Navbar 中的登入/管理員按鈕（保留 auth-container 中的）*/
+      header [data-slot="dropdown-menu-trigger"] { display: none !important; }
     </style>
     <script>
     (function removeOldUI() {
       function hideOldElements() {
         // 1. 移除 React IssueReportButton（fixed bottom-6 right-6 z-40）
-        //    特徵：className 包含 'fixed' 且包含 'bottom-6' 且包含 'right-6'
         document.querySelectorAll('button, div').forEach(function(el) {
           var cls = el.className || '';
           if (typeof cls === 'string' &&
@@ -106,14 +114,16 @@
           }
         });
 
-        // 2. 移除 React Navbar 中的「登入」按鈕（避免與右上角 auth-container 重疊）
-        //    特徵：Navbar 內的登入按鈕，className 包含 'bg-[#c9a86c]' 且文字為「登入」
+        // 2. 精確移除 Navbar 中的用戶下拉選單（data-slot="dropdown-menu"）
+        //    這是 React Navbar 中的 DropdownMenu 組件（個人資料/我的投稿/我的收藏/登出）
+        document.querySelectorAll('[data-slot="dropdown-menu"]').forEach(function(el) {
+          el.style.setProperty('display', 'none', 'important');
+        });
+
+        // 3. 移除 Navbar 中的「登入」按鈕（避免與右上角 auth-container 重疊）
         document.querySelectorAll('button').forEach(function(btn) {
           var cls = btn.className || '';
-          var txt = btn.textContent || btn.innerText || '';
-          if (cls.includes('bg-[#c9a86c]') && txt.trim() === '登入') {
-            btn.style.setProperty('display', 'none', 'important');
-          }
+          var txt = (btn.textContent || btn.innerText || '').trim();
           // 移除 Navbar 中的「管理員」按鈕（避免與左上角管理後台按鈕重疊）
           if (cls.includes('bg-[#c9a86c]/10') && txt.includes('管理員')) {
             btn.style.setProperty('display', 'none', 'important');
@@ -125,17 +135,23 @@
           }
         });
 
-        // 3. 移除 Navbar 中的「註冊」按鈕（若與 auth-container 重疊）
-        //    注意：只移除 Navbar 內的，不移除 auth-modal 中的
-        var navbar = document.querySelector('[class*="fixed top-0 left-0 right-0"]');
+        // 4. 移除 Navbar 中的「登入/註冊」按鈕（只移除 header/nav 內的）
+        var navbar = document.querySelector('header[role="banner"]');
         if (navbar) {
           navbar.querySelectorAll('button').forEach(function(btn) {
             var cls = btn.className || '';
             var txt = (btn.textContent || btn.innerText || '').trim();
-            // 隱藏 Navbar 中的登入/註冊按鈕（保留其他功能按鈕）
             if (txt === '登入' || txt === '註冊') {
               btn.style.setProperty('display', 'none', 'important');
             }
+            // 移除 Navbar 中的管理員連結按鈕
+            if (txt === '管理員' || (txt.includes('管理員') && cls.includes('ghost'))) {
+              btn.style.setProperty('display', 'none', 'important');
+            }
+          });
+          // 移除 Navbar 中的 avatar 按鈕（用戶頭像觸發器）
+          navbar.querySelectorAll('[data-slot="dropdown-menu-trigger"]').forEach(function(el) {
+            el.style.setProperty('display', 'none', 'important');
           });
         }
       }

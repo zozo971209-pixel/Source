@@ -695,7 +695,7 @@ const MC = {
     fields: [{id:'name',label:'時代名稱 *',req:true},{id:'title',label:'副標題'},{id:'period',label:'年代（如：西元前 600–300 年）'},{id:'description',label:'描述',type:'textarea'}],
     payload: (v,pid) => ({name:v.name, title:v.title, period:v.period, description:v.description, region_id:pid}) },
   philosopher: { title:'哲學家', table:'philosophers',
-    fields: [{id:'name',label:'姓名 *',req:true},{id:'birth_year',label:'出生年'},{id:'death_year',label:'逝世年'},{id:'avatar',label:'頭像 URL'},{id:'biography',label:'生平簡介',type:'textarea'},{id:'theories',label:'核心理論（簡述）',type:'textarea'},{id:'works',label:'主要著作',type:'textarea'}],
+    fields: [{id:'name',label:'姓名 *',req:true},{id:'birth_year',label:'出生年'},{id:'death_year',label:'逝世年'},{id:'avatar',label:'頭貼圖片',type:'image'},{id:'biography',label:'生平簡介',type:'textarea'},{id:'theories',label:'核心理論（簡述）',type:'textarea'},{id:'works',label:'主要著作',type:'textarea'}],
     payload: (v,pid) => ({name:v.name, birth_year:v.birth_year, death_year:v.death_year, avatar:v.avatar, biography:v.biography, theories:v.theories, works:v.works, era_id:pid}) },
   theory_p: { title:'理論（哲學家）', table:'theories',
     fields: [{id:'name',label:'理論名稱 *',req:true},{id:'description',label:'摘要',type:'textarea'},{id:'content',label:'詳細內容',type:'textarea'}],
@@ -749,6 +749,21 @@ async function openModal(type, editId, parentId) {
     const val = existing ? (existing[f.id] || '') : '';
     if (f.type === 'textarea') return `<div class="fr"><label>${f.label}</label><textarea id="mf-${f.id}">${e(String(val))}</textarea></div>`;
     if (f.type === 'select') return `<div class="fr"><label>${f.label}</label><select id="mf-${f.id}">${(f.opts||[]).map(o=>`<option value="${o}"${val===o?' selected':''}>${o}</option>`).join('')}</select></div>`;
+    if (f.type === 'image') return `<div class="fr">
+      <label>${f.label}</label>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+        <div id="mf-${f.id}-preview" style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#d4af37,#a68c2f);display:flex;align-items:center;justify-content:center;font-size:28px;color:#1a1a1a;overflow:hidden;flex-shrink:0;">
+          ${val ? `<img src="${val}" style="width:100%;height:100%;object-fit:cover;">` : '📷'}
+        </div>
+        <div style="flex:1;min-width:160px;">
+          <input type="file" id="mf-${f.id}-file" accept="image/*" style="display:none;" onchange="previewImage(this,'${f.id}')">
+          <input type="hidden" id="mf-${f.id}" value="${e(String(val))}">
+          <button type="button" class="btn btn-s" style="margin-bottom:8px;" onclick="document.getElementById('mf-${f.id}-file').click()">📁 選擇圖片</button>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">或輸入圖片 URL：</div>
+          <input type="text" id="mf-${f.id}-url" placeholder="https://..." value="${e(String(val))}" style="width:100%;" oninput="syncImageUrl(this,'${f.id}')">
+        </div>
+      </div>
+    </div>`;
     return `<div class="fr"><label>${f.label}</label><input type="text" id="mf-${f.id}" value="${e(String(val))}"></div>`;
   }).join('');
   document.getElementById('mo').classList.add('show');
@@ -797,6 +812,39 @@ function reloadView() {
 }
 
 function closeModal() { document.getElementById('mo').classList.remove('show'); }
+
+// 圖片上傳預覽
+function previewImage(input, fieldId) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 3 * 1024 * 1024) { toast('圖片大小不能超過 3MB', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const base64 = ev.target.result;
+    // 更新預覽
+    const preview = document.getElementById(`mf-${fieldId}-preview`);
+    if (preview) preview.innerHTML = `<img src="${base64}" style="width:100%;height:100%;object-fit:cover;">`;
+    // 更新隱藏的 hidden input
+    const hidden = document.getElementById(`mf-${fieldId}`);
+    if (hidden) hidden.value = base64;
+    // 更新 URL 輸入框
+    const urlInput = document.getElementById(`mf-${fieldId}-url`);
+    if (urlInput) urlInput.value = '(圖片已上傳)';
+  };
+  reader.readAsDataURL(file);
+}
+
+// 同步 URL 輸入到 hidden input
+function syncImageUrl(input, fieldId) {
+  const url = input.value.trim();
+  const hidden = document.getElementById(`mf-${fieldId}`);
+  if (hidden) hidden.value = url;
+  // 更新預覽
+  const preview = document.getElementById(`mf-${fieldId}-preview`);
+  if (preview && url && url.startsWith('http')) {
+    preview.innerHTML = `<img src="${url}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='📷'">`;
+  }
+}
 
 async function delItem(table, id, reload) {
   if (!confirm('確定要刪除此項目？此操作無法復原。')) return;
