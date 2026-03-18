@@ -93,6 +93,65 @@
     <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
     <div id="auth-container" style="position: fixed; top: 20px; right: 20px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 10px; pointer-events: auto; flex-wrap: wrap; max-width: 400px; justify-content: flex-end;"></div>
 
+    <!-- 攔截 React Router 的 /profile 和 /admin 路由，重定向到實際 HTML 頁面 -->
+    <script>
+    (function interceptReactRoutes() {
+      // 攔截 React Router 的 history.pushState / replaceState
+      const _push = history.pushState.bind(history);
+      const _replace = history.replaceState.bind(history);
+
+      function checkAndRedirect(url) {
+        if (!url) return false;
+        const path = typeof url === 'string' ? url : (url.pathname || '');
+        // 如果 React Router 試圖導向 /profile 或 /Source/profile
+        if (/\/profile$/.test(path) || /\/profile\//.test(path)) {
+          window.location.href = './profile.html';
+          return true;
+        }
+        // 如果 React Router 試圖導向 /admin（非 admin/index.html）
+        if (/\/admin$/.test(path) && !path.includes('index.html')) {
+          window.location.href = './admin/index.html';
+          return true;
+        }
+        return false;
+      }
+
+      history.pushState = function(state, title, url) {
+        if (checkAndRedirect(url)) return;
+        return _push(state, title, url);
+      };
+      history.replaceState = function(state, title, url) {
+        if (checkAndRedirect(url)) return;
+        return _replace(state, title, url);
+      };
+
+      // 監聽 popstate 事件（瀏覽器前進/後退）
+      window.addEventListener('popstate', function() {
+        checkAndRedirect(window.location.pathname);
+      });
+
+      // 攔截 React Router 的 <Link> 點擊（透過 click 事件委派）
+      document.addEventListener('click', function(e) {
+        const a = e.target.closest('a[href]');
+        if (!a) return;
+        const href = a.getAttribute('href');
+        if (!href) return;
+        // 攔截指向 /profile 的連結
+        if (href === '/profile' || href === '/Source/profile' || href.endsWith('/profile')) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.href = './profile.html';
+        }
+        // 攔截指向 /admin 的連結
+        if ((href === '/admin' || href === '/Source/admin' || href.endsWith('/admin')) && !href.includes('index.html')) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.location.href = './admin/index.html';
+        }
+      }, true);
+    })();
+    </script>
+
     <!-- 移除 React 內建的舊版 UI 元素，避免與新版 UI 重疊 -->
     <style>
       /* 強制隱藏 React IssueReportButton（fixed bottom-6 right-6 z-40）*/

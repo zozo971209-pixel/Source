@@ -4,10 +4,34 @@
   <meta charset="UTF-8">
   <script>
     (function () {
+      var path = window.location.pathname;
+      var search = window.location.search;
+      var hash = window.location.hash;
+
+      // 判斷是否為已知的靜態頁面路徑，直接重定向
+      // GitHub Pages 子路徑： /Source/profile → /Source/profile.html
+      if (/\/profile(\/|$)/.test(path)) {
+        window.location.replace('/Source/profile.html');
+        return;
+      }
+      if (/\/admin(\/|$)/.test(path) && !path.includes('index.html')) {
+        window.location.replace('/Source/admin/index.html');
+        return;
+      }
+      if (/\/feedback(\/|$)/.test(path)) {
+        window.location.replace('/Source/feedback.html');
+        return;
+      }
+      if (/\/submit(\/|$)/.test(path)) {
+        window.location.replace('/Source/submit.html');
+        return;
+      }
+
+      // 其他 SPA 路由：儲存路徑並重定向到 index.html
       try {
         sessionStorage.setItem(
           "spa_redirect",
-          window.location.pathname + window.location.search + window.location.hash
+          path + search + hash
         );
       } catch (e) {}
       window.location.replace("/Source/");
