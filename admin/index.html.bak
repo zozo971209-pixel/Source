@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理後台 | 源哲學網</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d0d0d; color: #e0e0e0; min-height: 100vh; display: flex; }
+    /* Sidebar */
+    .sidebar { width: 240px; min-height: 100vh; background: #1a1a1a; border-right: 1px solid rgba(212,175,55,0.15); display: flex; flex-direction: column; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; }
+    .sidebar-logo { padding: 24px 20px; border-bottom: 1px solid rgba(212,175,55,0.15); }
+    .sidebar-logo h1 { color: #d4af37; font-size: 20px; font-weight: 700; }
+    .sidebar-logo p { color: #666; font-size: 12px; margin-top: 4px; }
+    .sidebar-nav { flex: 1; padding: 16px 0; overflow-y: auto; }
+    .nav-section { padding: 8px 16px 4px; font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; cursor: pointer; color: #888; font-size: 14px; transition: all 0.2s; border-left: 3px solid transparent; }
+    .nav-item:hover { color: #d4af37; background: rgba(212,175,55,0.05); }
+    .nav-item.active { color: #d4af37; background: rgba(212,175,55,0.08); border-left-color: #d4af37; }
+    .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+    .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(212,175,55,0.15); }
+    .admin-info { font-size: 13px; color: #888; margin-bottom: 8px; }
+    .admin-info strong { color: #d4af37; }
+    .btn-logout { width: 100%; padding: 8px; background: transparent; border: 1px solid rgba(255,100,100,0.3); color: #ff6b6b; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .btn-logout:hover { background: rgba(255,100,100,0.1); }
+    /* Main content */
+    .main { margin-left: 240px; flex: 1; min-height: 100vh; }
+    .topbar { height: 60px; background: #1a1a1a; border-bottom: 1px solid rgba(212,175,55,0.15); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; position: sticky; top: 0; z-index: 50; }
+    .topbar h2 { font-size: 18px; font-weight: 600; color: #fff; }
+    .topbar-actions { display: flex; gap: 10px; }
+    .content { padding: 24px; }
+    /* Cards */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.15); border-radius: 12px; padding: 20px; }
+    .stat-card .num { font-size: 32px; font-weight: 700; color: #d4af37; }
+    .stat-card .label { font-size: 13px; color: #888; margin-top: 4px; }
+    .stat-card .change { font-size: 12px; color: #4caf50; margin-top: 8px; }
+    /* Tables */
+    .card { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.15); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+    .card-header { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .card-title { font-size: 15px; font-weight: 600; color: #fff; }
+    .card-body { padding: 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 12px 16px; text-align: left; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.02); }
+    td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    /* Badges */
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge-pending { background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
+    .badge-approved { background: rgba(76,175,80,0.15); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .badge-rejected { background: rgba(244,67,54,0.15); color: #f44336; border: 1px solid rgba(244,67,54,0.3); }
+    .badge-open { background: rgba(33,150,243,0.15); color: #2196f3; border: 1px solid rgba(33,150,243,0.3); }
+    .badge-resolved { background: rgba(76,175,80,0.15); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .badge-admin { background: rgba(212,175,55,0.15); color: #d4af37; border: 1px solid rgba(212,175,55,0.3); }
+    /* Buttons */
+    .btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+    .btn-primary { background: linear-gradient(135deg, #d4af37, #a68c2f); color: #1a1a1a; }
+    .btn-success { background: rgba(76,175,80,0.2); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .btn-danger { background: rgba(244,67,54,0.2); color: #f44336; border: 1px solid rgba(244,67,54,0.3); }
+    .btn-secondary { background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.1); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+    /* Forms */
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #d4af37; }
+    .form-group select option { background: #2a2a2a; }
+    .form-group textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.2); border-radius: 16px; padding: 28px; width: 100%; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+    .modal h3 { font-size: 18px; color: #d4af37; margin-bottom: 20px; }
+    .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    /* Panels */
+    .panel { display: none; }
+    .panel.active { display: block; }
+    /* Search */
+    .search-bar { display: flex; gap: 10px; align-items: center; }
+    .search-bar input { padding: 8px 14px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; width: 240px; }
+    .search-bar input:focus { border-color: #d4af37; }
+    /* Login */
+    #login-screen { position: fixed; inset: 0; background: #111; display: flex; align-items: center; justify-content: center; z-index: 9999; }
+    .login-box { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.3); border-radius: 16px; padding: 40px; width: 360px; text-align: center; }
+    .login-box h2 { color: #d4af37; font-size: 24px; margin-bottom: 8px; }
+    .login-box p { color: #888; font-size: 14px; margin-bottom: 28px; }
+    .login-box input { width: 100%; padding: 12px 16px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; margin-bottom: 12px; }
+    .login-box input:focus { border-color: #d4af37; }
+    .login-box button { width: 100%; padding: 12px; background: linear-gradient(135deg, #d4af37, #a68c2f); color: #1a1a1a; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; margin-top: 4px; }
+    .login-error { color: #f44336; font-size: 13px; margin-top: 8px; display: none; }
+    /* Empty state */
+    .empty { text-align: center; padding: 48px 20px; color: #555; }
+    .empty .icon { font-size: 40px; margin-bottom: 12px; }
+    /* Loading */
+    .loading { text-align: center; padding: 40px; color: #666; }
+    /* Textarea for content preview */
+    .content-preview { font-size: 13px; color: #bbb; line-height: 1.5; max-height: 80px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    /* Tab nav */
+    .tab-nav { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+    .tab-btn { padding: 8px 16px; background: transparent; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: #888; cursor: pointer; font-size: 13px; }
+    .tab-btn.active { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.4); color: #d4af37; }
+    @media (max-width: 768px) { .sidebar { width: 200px; } .main { margin-left: 200px; } }
+  </style>
+</head>
+<body>
+  <!-- 登入畫面 -->
+  <div id="login-screen">
+    <div class="login-box">
+      <h2>源 管理後台</h2>
+      <p>請使用管理員帳號登入</p>
+      <input type="email" id="login-email" placeholder="管理員信箱" value="zozo971209@gmail.com">
+      <input type="password" id="login-password" placeholder="密碼" onkeydown="if(event.key==='Enter')doLogin()">
+      <button onclick="doLogin()">登入後台</button>
+      <div class="login-error" id="login-error"></div>
+    </div>
+  </div>
+
+  <!-- 側邊欄 -->
+  <div class="sidebar" id="sidebar" style="display:none;">
+    <div class="sidebar-logo">
+      <h1>源 後台</h1>
+      <p>哲學網管理系統</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">總覽</div>
+      <div class="nav-item active" onclick="showPanel('dashboard')"><span class="icon">📊</span>儀表板</div>
+      <div class="nav-section">內容管理</div>
+      <div class="nav-item" onclick="showPanel('era')"><span class="icon">🏛️</span>哲學時代</div>
+      <div class="nav-item" onclick="showPanel('theory')"><span class="icon">📚</span>哲學理論</div>
+      <div class="nav-item" onclick="showPanel('question')"><span class="icon">❓</span>哲學問題</div>
+      <div class="nav-item" onclick="showPanel('thinker')"><span class="icon">💡</span>新思想家</div>
+      <div class="nav-section">審核管理</div>
+      <div class="nav-item" onclick="showPanel('submissions')"><span class="icon">📝</span>投稿審核 <span id="pending-badge" style="margin-left:auto;background:#f44336;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;display:none;"></span></div>
+      <div class="nav-item" onclick="showPanel('reports')"><span class="icon">🐛</span>意見回報</div>
+      <div class="nav-section">用戶管理</div>
+      <div class="nav-item" onclick="showPanel('users')"><span class="icon">👥</span>用戶列表</div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="admin-info">管理員：<strong id="admin-name">載入中</strong></div>
+      <button class="btn-logout" onclick="doLogout()">登出</button>
+    </div>
+  </div>
+
+  <!-- 主內容 -->
+  <div class="main" id="main-content" style="display:none;">
+    <div class="topbar">
+      <h2 id="page-title">儀表板</h2>
+      <div class="topbar-actions">
+        <a href="../" target="_blank" style="color:#888;font-size:13px;text-decoration:none;">查看前台 →</a>
+      </div>
+    </div>
+    <div class="content">
+
+      <!-- 儀表板 -->
+      <div class="panel active" id="panel-dashboard">
+        <div class="stats-grid" id="stats-grid">
+          <div class="stat-card"><div class="num" id="stat-users">-</div><div class="label">註冊用戶</div></div>
+          <div class="stat-card"><div class="num" id="stat-submissions">-</div><div class="label">投稿總數</div></div>
+          <div class="stat-card"><div class="num" id="stat-pending">-</div><div class="label">待審核投稿</div></div>
+          <div class="stat-card"><div class="num" id="stat-reports">-</div><div class="label">意見回報</div></div>
+          <div class="stat-card"><div class="num" id="stat-likes">-</div><div class="label">按讚總數</div></div>
+          <div class="stat-card"><div class="num" id="stat-bookmarks">-</div><div class="label">收藏總數</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">最新投稿</span></div>
+          <div class="card-body" id="recent-submissions"><div class="loading">載入中...</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">最新回報</span></div>
+          <div class="card-body" id="recent-reports"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 哲學時代管理 -->
+      <div class="panel" id="panel-era">
+        <div class="tab-nav">
+          <button class="tab-btn active" onclick="switchEraTab('regions')">地區管理</button>
+          <button class="tab-btn" onclick="switchEraTab('eras')">時代管理</button>
+          <button class="tab-btn" onclick="switchEraTab('philosophers')">哲學家管理</button>
+        </div>
+        <div id="era-tab-regions">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">地區列表</span>
+              <button class="btn btn-primary" onclick="openAddModal('region')">+ 新增地區</button>
+            </div>
+            <div class="card-body" id="regions-list"><div class="loading">載入中...</div></div>
+          </div>
+        </div>
+        <div id="era-tab-eras" style="display:none;">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">時代列表</span>
+              <button class="btn btn-primary" onclick="openAddModal('era')">+ 新增時代</button>
+            </div>
+            <div class="card-body" id="eras-list"><div class="loading">載入中...</div></div>
+          </div>
+        </div>
+        <div id="era-tab-philosophers" style="display:none;">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">哲學家列表</span>
+              <button class="btn btn-primary" onclick="openAddModal('philosopher')">+ 新增哲學家</button>
+            </div>
+            <div class="card-body" id="philosophers-list"><div class="loading">載入中...</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 哲學理論管理 -->
+      <div class="panel" id="panel-theory">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">哲學理論列表</span>
+            <button class="btn btn-primary" onclick="openAddModal('theory')">+ 新增理論</button>
+          </div>
+          <div class="card-body" id="theories-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 哲學問題管理 -->
+      <div class="panel" id="panel-question">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">哲學問題列表</span>
+            <button class="btn btn-primary" onclick="openAddModal('question')">+ 新增問題</button>
+          </div>
+          <div class="card-body" id="questions-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 新思想家管理 -->
+      <div class="panel" id="panel-thinker">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">新思想家列表（已審核通過的投稿）</span>
+          </div>
+          <div class="card-body" id="thinkers-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 投稿審核 -->
+      <div class="panel" id="panel-submissions">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">投稿列表</span>
+            <div class="search-bar">
+              <select id="submission-filter" onchange="loadSubmissions()">
+                <option value="all">全部</option>
+                <option value="pending" selected>待審核</option>
+                <option value="approved">已通過</option>
+                <option value="rejected">已拒絕</option>
+              </select>
+            </div>
+          </div>
+          <div class="card-body" id="submissions-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 意見回報 -->
+      <div class="panel" id="panel-reports">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">意見回報列表</span>
+            <select id="report-filter" onchange="loadReports()">
+              <option value="all">全部</option>
+              <option value="pending" selected>待處理</option>
+              <option value="resolved">已解決</option>
+            </select>
+          </div>
+          <div class="card-body" id="reports-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+      <!-- 用戶管理 -->
+      <div class="panel" id="panel-users">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">用戶列表</span>
+            <div class="search-bar">
+              <input type="text" id="user-search" placeholder="搜尋用戶..." oninput="filterUsers()">
+            </div>
+          </div>
+          <div class="card-body" id="users-list"><div class="loading">載入中...</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 通用新增/編輯 Modal -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <h3 id="modal-title">新增</h3>
+      <div id="modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" id="modal-save-btn" onclick="saveModal()">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 投稿詳情 Modal -->
+  <div class="modal-overlay" id="submission-modal">
+    <div class="modal" style="max-width:700px;">
+      <h3 id="sub-modal-title">投稿詳情</h3>
+      <div id="sub-modal-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeSubmissionModal()">關閉</button>
+        <button class="btn btn-danger" id="sub-reject-btn" onclick="reviewSubmission('rejected')">拒絕</button>
+        <button class="btn btn-success" id="sub-approve-btn" onclick="reviewSubmission('approved')">通過</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" style="position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;display:none;"></div>
+
+  <script>
+    const SB_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+    const SB_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+    const ADMIN_EMAIL = 'zozo971209@gmail.com';
+    let sb = null, currentUser = null, currentPanel = 'dashboard';
+    let modalType = null, modalEditId = null, currentSubmissionId = null;
+    let allUsers = [];
+
+    // ==================== 初始化 ====================
+    async function init() {
+      await new Promise(r => {
+        if (window.supabase && window.supabase.createClient) { r(); return; }
+        const t = setInterval(() => { if (window.supabase && window.supabase.createClient) { clearInterval(t); r(); } }, 50);
+        setTimeout(() => { clearInterval(t); r(); }, 5000);
+      });
+      sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true } });
+      const { data: { session } } = await sb.auth.getSession();
+      if (session && session.user.email === ADMIN_EMAIL) {
+        currentUser = session.user;
+        showAdmin();
+      }
+    }
+
+    async function doLogin() {
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      errEl.style.display = 'none';
+      if (email !== ADMIN_EMAIL) { errEl.textContent = '非管理員帳號'; errEl.style.display = 'block'; return; }
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) { errEl.textContent = '登入失敗：' + error.message; errEl.style.display = 'block'; return; }
+      currentUser = data.user;
+      showAdmin();
+    }
+
+    function showAdmin() {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('sidebar').style.display = 'flex';
+      document.getElementById('main-content').style.display = 'block';
+      document.getElementById('admin-name').textContent = currentUser.email;
+      loadDashboard();
+    }
+
+    async function doLogout() {
+      await sb.auth.signOut();
+      window.location.reload();
+    }
+
+    // ==================== 面板切換 ====================
+    function showPanel(name) {
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      document.getElementById('panel-' + name).classList.add('active');
+      currentPanel = name;
+      const titles = { dashboard:'儀表板', era:'哲學時代管理', theory:'哲學理論管理', question:'哲學問題管理', thinker:'新思想家管理', submissions:'投稿審核', reports:'意見回報', users:'用戶管理' };
+      document.getElementById('page-title').textContent = titles[name] || name;
+      event.currentTarget.classList.add('active');
+      const loaders = { dashboard: loadDashboard, era: loadEraPanel, theory: loadTheories, question: loadQuestions, thinker: loadThinkers, submissions: loadSubmissions, reports: loadReports, users: loadUsers };
+      if (loaders[name]) loaders[name]();
+    }
+
+    // ==================== 儀表板 ====================
+    async function loadDashboard() {
+      const [usersR, subsR, reportsR, likesR, bookmarksR] = await Promise.all([
+        sb.from('users').select('id', { count: 'exact', head: true }),
+        sb.from('submissions').select('id,status', { count: 'exact' }),
+        sb.from('reports').select('id', { count: 'exact', head: true }),
+        sb.from('content_likes').select('id', { count: 'exact', head: true }),
+        sb.from('content_bookmarks').select('id', { count: 'exact', head: true })
+      ]);
+      document.getElementById('stat-users').textContent = usersR.count || 0;
+      const subs = subsR.data || [];
+      document.getElementById('stat-submissions').textContent = subs.length;
+      const pending = subs.filter(s => s.status === 'pending').length;
+      document.getElementById('stat-pending').textContent = pending;
+      document.getElementById('stat-reports').textContent = reportsR.count || 0;
+      document.getElementById('stat-likes').textContent = likesR.count || 0;
+      document.getElementById('stat-bookmarks').textContent = bookmarksR.count || 0;
+      if (pending > 0) { const b = document.getElementById('pending-badge'); b.textContent = pending; b.style.display = 'inline'; }
+      // Recent submissions
+      const { data: recentSubs } = await sb.from('submissions').select('*').order('created_at', { ascending: false }).limit(5);
+      renderRecentSubmissions(recentSubs || []);
+      // Recent reports
+      const { data: recentReps } = await sb.from('reports').select('*').order('created_at', { ascending: false }).limit(5);
+      renderRecentReports(recentReps || []);
+    }
+
+    function renderRecentSubmissions(data) {
+      const el = document.getElementById('recent-submissions');
+      if (!data.length) { el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>暫無投稿</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>分類</th><th>狀態</th><th>時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(s => `<tr><td>${esc(s.title)}</td><td>${catLabel(s.category)}</td><td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span></td><td>${fmtDate(s.created_at)}</td><td><button class="btn btn-sm btn-secondary" onclick="viewSubmission('${s.id}')">查看</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    function renderRecentReports(data) {
+      const el = document.getElementById('recent-reports');
+      if (!data.length) { el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>暫無回報</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>類型</th><th>狀態</th><th>時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(r => `<tr><td>${esc(r.title||'(無標題)')}</td><td>${reportTypeLabel(r.report_type)}</td><td><span class="badge badge-${r.status==='resolved'?'resolved':'open'}">${r.status==='resolved'?'已解決':'待處理'}</span></td><td>${fmtDate(r.created_at)}</td><td><button class="btn btn-sm btn-success" onclick="resolveReport('${r.id}')">標記解決</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    // ==================== 哲學時代 ====================
+    function switchEraTab(tab) {
+      ['regions','eras','philosophers'].forEach(t => {
+        document.getElementById('era-tab-'+t).style.display = t===tab?'block':'none';
+      });
+      document.querySelectorAll('#panel-era .tab-btn').forEach((b,i) => {
+        b.classList.toggle('active', ['regions','eras','philosophers'][i]===tab);
+      });
+      if (tab==='regions') loadRegions();
+      else if (tab==='eras') loadEras();
+      else loadPhilosophers();
+    }
+
+    async function loadEraPanel() { loadRegions(); }
+
+    async function loadRegions() {
+      const { data } = await sb.from('regions').select('*').order('name');
+      const el = document.getElementById('regions-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">🗺️</div><p>尚無地區</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>名稱</th><th>描述</th><th>操作</th></tr></thead><tbody>' +
+        data.map(r => `<tr><td>${esc(r.name)}</td><td>${esc(r.description||'')}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="openEditModal('region','${r.id}',${JSON.stringify(JSON.stringify(r))})">編輯</button><button class="btn btn-sm btn-danger" onclick="deleteItem('regions','${r.id}',loadRegions)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    async function loadEras() {
+      const { data } = await sb.from('eras').select('*, regions(name)').order('name');
+      const el = document.getElementById('eras-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">⏳</div><p>尚無時代</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>名稱</th><th>地區</th><th>時期</th><th>描述</th><th>操作</th></tr></thead><tbody>' +
+        data.map(e => `<tr><td>${esc(e.name)}</td><td>${esc(e.regions?.name||'')}</td><td>${esc(e.period||'')}</td><td class="content-preview">${esc(e.description||'')}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="openEditModal('era','${e.id}',${JSON.stringify(JSON.stringify(e))})">編輯</button><button class="btn btn-sm btn-danger" onclick="deleteItem('eras','${e.id}',loadEras)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    async function loadPhilosophers() {
+      const { data } = await sb.from('philosophers').select('*, eras(name)').order('name');
+      const el = document.getElementById('philosophers-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">🧠</div><p>尚無哲學家</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>姓名</th><th>時代</th><th>生卒年</th><th>描述</th><th>操作</th></tr></thead><tbody>' +
+        data.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.eras?.name||'')}</td><td>${esc(p.birth_year||'')}${p.death_year?'~'+p.death_year:''}</td><td class="content-preview">${esc(p.description||'')}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="openEditModal('philosopher','${p.id}',${JSON.stringify(JSON.stringify(p))})">編輯</button><button class="btn btn-sm btn-danger" onclick="deleteItem('philosophers','${p.id}',loadPhilosophers)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    // ==================== 哲學理論 ====================
+    async function loadTheories() {
+      const { data } = await sb.from('theories').select('*, philosophers(name), theory_categories(name)').order('title');
+      const el = document.getElementById('theories-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">📚</div><p>尚無理論</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>哲學家</th><th>領域</th><th>摘要</th><th>操作</th></tr></thead><tbody>' +
+        data.map(t => `<tr><td>${esc(t.title)}</td><td>${esc(t.philosophers?.name||'')}</td><td>${esc(t.theory_categories?.name||'')}</td><td class="content-preview">${esc(t.summary||t.content||'')}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="openEditModal('theory','${t.id}',${JSON.stringify(JSON.stringify(t))})">編輯</button><button class="btn btn-sm btn-danger" onclick="deleteItem('theories','${t.id}',loadTheories)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    // ==================== 哲學問題 ====================
+    async function loadQuestions() {
+      const { data } = await sb.from('questions').select('*').order('title');
+      const el = document.getElementById('questions-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">❓</div><p>尚無問題</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>領域</th><th>描述</th><th>操作</th></tr></thead><tbody>' +
+        data.map(q => `<tr><td>${esc(q.title)}</td><td>${esc(q.field||'')}</td><td class="content-preview">${esc(q.description||q.content||'')}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="openEditModal('question','${q.id}',${JSON.stringify(JSON.stringify(q))})">編輯</button><button class="btn btn-sm btn-danger" onclick="deleteItem('questions','${q.id}',loadQuestions)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    // ==================== 新思想家 ====================
+    async function loadThinkers() {
+      const { data } = await sb.from('submissions').select('*, users(name,email)').eq('status','approved').order('created_at', { ascending: false });
+      const el = document.getElementById('thinkers-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">💡</div><p>尚無已通過的投稿</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>分類</th><th>投稿者</th><th>通過時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(s => `<tr><td>${esc(s.title)}</td><td>${catLabel(s.category)}</td><td>${esc(s.users?.name||s.users?.email||'')}</td><td>${fmtDate(s.updated_at||s.created_at)}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="viewSubmission('${s.id}')">查看</button><button class="btn btn-sm btn-danger" onclick="updateSubmissionStatus('${s.id}','rejected')">撤回</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    // ==================== 投稿審核 ====================
+    async function loadSubmissions() {
+      const filter = document.getElementById('submission-filter').value;
+      let query = sb.from('submissions').select('*, users(name,email)').order('created_at', { ascending: false });
+      if (filter !== 'all') query = query.eq('status', filter);
+      const { data } = await query;
+      const el = document.getElementById('submissions-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>暫無投稿</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>分類</th><th>投稿者</th><th>狀態</th><th>時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(s => `<tr><td>${esc(s.title)}</td><td>${catLabel(s.category)}</td><td>${esc(s.users?.name||s.users?.email||'匿名')}</td><td><span class="badge badge-${s.status}">${statusLabel(s.status)}</span></td><td>${fmtDate(s.created_at)}</td><td class="btn-group"><button class="btn btn-sm btn-secondary" onclick="viewSubmission('${s.id}')">查看</button>${s.status==='pending'?`<button class="btn btn-sm btn-success" onclick="updateSubmissionStatus('${s.id}','approved')">通過</button><button class="btn btn-sm btn-danger" onclick="updateSubmissionStatus('${s.id}','rejected')">拒絕</button>`:''}</td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    async function viewSubmission(id) {
+      const { data } = await sb.from('submissions').select('*, users(name,email)').eq('id', id).single();
+      if (!data) return;
+      currentSubmissionId = id;
+      document.getElementById('sub-modal-title').textContent = data.title;
+      document.getElementById('sub-modal-body').innerHTML = `
+        <div style="margin-bottom:12px;"><span class="badge badge-${data.status}">${statusLabel(data.status)}</span> <span style="color:#888;font-size:13px;margin-left:8px;">${catLabel(data.category)} · ${fmtDate(data.created_at)}</span></div>
+        ${data.philosopher_name?`<p style="color:#888;font-size:13px;margin-bottom:8px;">思想家：${esc(data.philosopher_name)}</p>`:''}
+        ${data.era?`<p style="color:#888;font-size:13px;margin-bottom:8px;">時代/地區：${esc(data.era)}</p>`:''}
+        ${data.field?`<p style="color:#888;font-size:13px;margin-bottom:8px;">領域：${esc(data.field)}</p>`:''}
+        <div style="margin:16px 0;padding:16px;background:#2a2a2a;border-radius:8px;font-size:14px;line-height:1.7;color:#ddd;">${esc(data.content)}</div>
+        ${data.rebuttal?`<div style="margin-bottom:12px;"><strong style="color:#d4af37;font-size:13px;">批判與反駁：</strong><div style="margin-top:8px;padding:12px;background:#2a2a2a;border-radius:8px;font-size:13px;color:#bbb;">${esc(data.rebuttal)}</div></div>`:''}
+        ${data.ref_sources?`<div><strong style="color:#d4af37;font-size:13px;">參考資料：</strong><div style="margin-top:8px;font-size:13px;color:#888;">${esc(data.ref_sources)}</div></div>`:''}
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);">
+          <label style="font-size:13px;color:#888;display:block;margin-bottom:6px;">管理員備註：</label>
+          <textarea id="admin-note" style="width:100%;padding:10px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:13px;outline:none;resize:vertical;min-height:60px;">${esc(data.admin_note||'')}</textarea>
+        </div>
+      `;
+      document.getElementById('sub-approve-btn').style.display = data.status==='approved'?'none':'';
+      document.getElementById('sub-reject-btn').style.display = data.status==='rejected'?'none':'';
+      document.getElementById('submission-modal').classList.add('show');
+    }
+
+    async function reviewSubmission(status) {
+      const note = document.getElementById('admin-note').value.trim();
+      const { error } = await sb.from('submissions').update({ status, admin_note: note, updated_at: new Date().toISOString() }).eq('id', currentSubmissionId);
+      if (error) { toast('操作失敗：' + error.message, 'error'); return; }
+      toast(status==='approved'?'投稿已通過！':'投稿已拒絕', status==='approved'?'success':'info');
+      closeSubmissionModal();
+      loadSubmissions();
+    }
+
+    async function updateSubmissionStatus(id, status) {
+      const { error } = await sb.from('submissions').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) { toast('操作失敗', 'error'); return; }
+      toast(status==='approved'?'已通過':'已拒絕/撤回', 'success');
+      loadSubmissions();
+      if (currentPanel==='thinker') loadThinkers();
+    }
+
+    function closeSubmissionModal() { document.getElementById('submission-modal').classList.remove('show'); }
+
+    // ==================== 意見回報 ====================
+    async function loadReports() {
+      const filter = document.getElementById('report-filter').value;
+      let query = sb.from('reports').select('*').order('created_at', { ascending: false });
+      if (filter !== 'all') query = query.eq('status', filter);
+      const { data } = await query;
+      const el = document.getElementById('reports-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">📭</div><p>暫無回報</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>標題</th><th>類型</th><th>內容</th><th>聯絡信箱</th><th>狀態</th><th>時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(r => `<tr><td>${esc(r.title||'(無標題)')}</td><td>${reportTypeLabel(r.report_type)}</td><td class="content-preview">${esc(r.content||'')}</td><td style="font-size:12px;color:#888;">${esc(r.contact_email||'')}</td><td><span class="badge badge-${r.status==='resolved'?'resolved':'open'}">${r.status==='resolved'?'已解決':'待處理'}</span></td><td>${fmtDate(r.created_at)}</td><td class="btn-group">${r.status!=='resolved'?`<button class="btn btn-sm btn-success" onclick="resolveReport('${r.id}')">解決</button>`:''}<button class="btn btn-sm btn-danger" onclick="deleteItem('reports','${r.id}',loadReports)">刪除</button></td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    async function resolveReport(id) {
+      await sb.from('reports').update({ status: 'resolved' }).eq('id', id);
+      toast('已標記為解決', 'success');
+      loadReports();
+    }
+
+    // ==================== 用戶管理 ====================
+    async function loadUsers() {
+      const { data } = await sb.from('users').select('*').order('created_at', { ascending: false });
+      allUsers = data || [];
+      renderUsers(allUsers);
+    }
+
+    function filterUsers() {
+      const q = document.getElementById('user-search').value.toLowerCase();
+      renderUsers(allUsers.filter(u => (u.name||'').toLowerCase().includes(q) || (u.email||'').toLowerCase().includes(q)));
+    }
+
+    function renderUsers(data) {
+      const el = document.getElementById('users-list');
+      if (!data.length) { el.innerHTML = '<div class="empty"><div class="icon">👥</div><p>暫無用戶</p></div>'; return; }
+      el.innerHTML = '<table><thead><tr><th>名稱</th><th>信箱</th><th>角色</th><th>註冊時間</th><th>操作</th></tr></thead><tbody>' +
+        data.map(u => `<tr><td>${esc(u.name||u.username||'')}</td><td style="font-size:13px;color:#888;">${esc(u.email||'')}</td><td>${u.is_admin?'<span class="badge badge-admin">管理員</span>':'<span style="color:#888;font-size:13px;">一般用戶</span>'}</td><td>${fmtDate(u.created_at)}</td><td class="btn-group">${!u.is_admin?`<button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">刪除帳號</button>`:''}</td></tr>`).join('') +
+        '</tbody></table>';
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('確定要刪除此用戶帳號？此操作不可還原。')) return;
+      const { error } = await sb.from('users').delete().eq('id', id);
+      if (error) { toast('刪除失敗：' + error.message, 'error'); return; }
+      toast('用戶已刪除', 'success');
+      loadUsers();
+    }
+
+    // ==================== 通用 CRUD Modal ====================
+    async function openAddModal(type) {
+      modalType = type; modalEditId = null;
+      document.getElementById('modal-title').textContent = '新增' + typeLabel(type);
+      document.getElementById('modal-body').innerHTML = await buildForm(type, null);
+      document.getElementById('modal-overlay').classList.add('show');
+      await populateSelects(type);
+    }
+
+    async function openEditModal(type, id, dataStr) {
+      modalType = type; modalEditId = id;
+      const data = JSON.parse(dataStr);
+      document.getElementById('modal-title').textContent = '編輯' + typeLabel(type);
+      document.getElementById('modal-body').innerHTML = await buildForm(type, data);
+      document.getElementById('modal-overlay').classList.add('show');
+      await populateSelects(type, data);
+    }
+
+    function closeModal() { document.getElementById('modal-overlay').classList.remove('show'); }
+
+    async function buildForm(type, data) {
+      const v = (k) => data ? (data[k]||'') : '';
+      const forms = {
+        region: `<div class="form-group"><label>地區名稱 *</label><input id="f-name" value="${esc(v('name'))}" placeholder="例：古希臘"></div><div class="form-group"><label>描述</label><textarea id="f-description">${esc(v('description'))}</textarea></div>`,
+        era: `<div class="form-group"><label>時代名稱 *</label><input id="f-name" value="${esc(v('name'))}" placeholder="例：古典時期"></div><div class="form-group"><label>所屬地區</label><select id="f-region_id"><option value="">-- 選擇地區 --</option></select></div><div class="form-group"><label>時期</label><input id="f-period" value="${esc(v('period'))}" placeholder="例：西元前 500-300 年"></div><div class="form-group"><label>描述</label><textarea id="f-description">${esc(v('description'))}</textarea></div>`,
+        philosopher: `<div class="form-group"><label>哲學家姓名 *</label><input id="f-name" value="${esc(v('name'))}" placeholder="例：蘇格拉底"></div><div class="form-group"><label>所屬時代</label><select id="f-era_id"><option value="">-- 選擇時代 --</option></select></div><div class="form-group"><label>生年</label><input id="f-birth_year" value="${esc(v('birth_year'))}" placeholder="例：-470"></div><div class="form-group"><label>卒年</label><input id="f-death_year" value="${esc(v('death_year'))}" placeholder="例：-399"></div><div class="form-group"><label>生平描述</label><textarea id="f-description">${esc(v('description'))}</textarea></div><div class="form-group"><label>主要理論</label><textarea id="f-theories">${esc(v('theories'))}</textarea></div>`,
+        theory: `<div class="form-group"><label>理論標題 *</label><input id="f-title" value="${esc(v('title'))}" placeholder="理論名稱"></div><div class="form-group"><label>所屬哲學家</label><select id="f-philosopher_id"><option value="">-- 選擇哲學家 --</option></select></div><div class="form-group"><label>理論領域</label><select id="f-category_id"><option value="">-- 選擇領域 --</option></select></div><div class="form-group"><label>摘要</label><textarea id="f-summary">${esc(v('summary'))}</textarea></div><div class="form-group"><label>詳細內容</label><textarea id="f-content" style="min-height:160px;">${esc(v('content'))}</textarea></div>`,
+        question: `<div class="form-group"><label>問題標題 *</label><input id="f-title" value="${esc(v('title'))}" placeholder="哲學問題"></div><div class="form-group"><label>領域</label><input id="f-field" value="${esc(v('field'))}" placeholder="例：形上學、倫理學"></div><div class="form-group"><label>描述</label><textarea id="f-description" style="min-height:120px;">${esc(v('description'))}</textarea></div><div class="form-group"><label>詳細內容</label><textarea id="f-content" style="min-height:160px;">${esc(v('content'))}</textarea></div>`
+      };
+      return forms[type] || '';
+    }
+
+    async function populateSelects(type, data) {
+      if (type === 'era') {
+        const { data: regions } = await sb.from('regions').select('id,name').order('name');
+        const sel = document.getElementById('f-region_id');
+        if (sel && regions) {
+          regions.forEach(r => { const o = new Option(r.name, r.id); if (data && data.region_id === r.id) o.selected = true; sel.appendChild(o); });
+        }
+      } else if (type === 'philosopher') {
+        const { data: eras } = await sb.from('eras').select('id,name').order('name');
+        const sel = document.getElementById('f-era_id');
+        if (sel && eras) {
+          eras.forEach(e => { const o = new Option(e.name, e.id); if (data && data.era_id === e.id) o.selected = true; sel.appendChild(o); });
+        }
+      } else if (type === 'theory') {
+        const [{ data: phils }, { data: cats }] = await Promise.all([
+          sb.from('philosophers').select('id,name').order('name'),
+          sb.from('theory_categories').select('id,name').order('name')
+        ]);
+        const ps = document.getElementById('f-philosopher_id');
+        if (ps && phils) phils.forEach(p => { const o = new Option(p.name, p.id); if (data && data.philosopher_id === p.id) o.selected = true; ps.appendChild(o); });
+        const cs = document.getElementById('f-category_id');
+        if (cs && cats) cats.forEach(c => { const o = new Option(c.name, c.id); if (data && data.category_id === c.id) o.selected = true; cs.appendChild(o); });
+      }
+    }
+
+    async function saveModal() {
+      const getVal = (id) => { const el = document.getElementById(id); return el ? el.value.trim() : null; };
+      let payload = {};
+      const tableMap = { region: 'regions', era: 'eras', philosopher: 'philosophers', theory: 'theories', question: 'questions' };
+      const table = tableMap[modalType];
+      if (!table) return;
+
+      if (modalType === 'region') {
+        const name = getVal('f-name');
+        if (!name) { toast('請填寫名稱', 'error'); return; }
+        payload = { name, description: getVal('f-description') };
+      } else if (modalType === 'era') {
+        const name = getVal('f-name');
+        if (!name) { toast('請填寫名稱', 'error'); return; }
+        payload = { name, region_id: getVal('f-region_id')||null, period: getVal('f-period'), description: getVal('f-description') };
+      } else if (modalType === 'philosopher') {
+        const name = getVal('f-name');
+        if (!name) { toast('請填寫名稱', 'error'); return; }
+        payload = { name, era_id: getVal('f-era_id')||null, birth_year: getVal('f-birth_year'), death_year: getVal('f-death_year'), description: getVal('f-description'), theories: getVal('f-theories') };
+      } else if (modalType === 'theory') {
+        const title = getVal('f-title');
+        if (!title) { toast('請填寫標題', 'error'); return; }
+        payload = { title, philosopher_id: getVal('f-philosopher_id')||null, category_id: getVal('f-category_id')||null, summary: getVal('f-summary'), content: getVal('f-content') };
+      } else if (modalType === 'question') {
+        const title = getVal('f-title');
+        if (!title) { toast('請填寫標題', 'error'); return; }
+        payload = { title, field: getVal('f-field'), description: getVal('f-description'), content: getVal('f-content') };
+      }
+
+      let error;
+      if (modalEditId) {
+        ({ error } = await sb.from(table).update(payload).eq('id', modalEditId));
+      } else {
+        ({ error } = await sb.from(table).insert(payload));
+      }
+      if (error) { toast('儲存失敗：' + error.message, 'error'); return; }
+      toast('儲存成功！', 'success');
+      closeModal();
+      const reloaders = { region: loadRegions, era: loadEras, philosopher: loadPhilosophers, theory: loadTheories, question: loadQuestions };
+      if (reloaders[modalType]) reloaders[modalType]();
+    }
+
+    async function deleteItem(table, id, reload) {
+      if (!confirm('確定要刪除此項目？')) return;
+      const { error } = await sb.from(table).delete().eq('id', id);
+      if (error) { toast('刪除失敗：' + error.message, 'error'); return; }
+      toast('已刪除', 'success');
+      reload();
+    }
+
+    // ==================== 工具函數 ====================
+    function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function fmtDate(s) { if (!s) return '-'; const d = new Date(s); return d.getFullYear()+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getDate().toString().padStart(2,'0'); }
+    function catLabel(c) { return {philosopher:'新思想家',theory:'哲學理論',question:'哲學問題'}[c]||c||'-'; }
+    function statusLabel(s) { return {pending:'待審核',approved:'已通過',rejected:'已拒絕'}[s]||s||'-'; }
+    function reportTypeLabel(t) { return {bug:'問題回報',suggestion:'功能建議',content:'內容錯誤',other:'其他'}[t]||t||'-'; }
+    function typeLabel(t) { return {region:'地區',era:'時代',philosopher:'哲學家',theory:'理論',question:'問題'}[t]||t; }
+
+    function toast(msg, type) {
+      const t = document.getElementById('toast');
+      const c = {success:'#1a3a1a',error:'#3a1a1a',info:'#1a2a3a'}[type]||'#1a2a3a';
+      const b = {success:'#4caf50',error:'#f44336',info:'#2196f3'}[type]||'#2196f3';
+      t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:99999;background:'+c+';border:1px solid '+b+';color:'+b+';display:block;';
+      t.textContent = msg;
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+
+    // 點擊 overlay 關閉 modal
+    document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+    document.getElementById('submission-modal').addEventListener('click', function(e) { if (e.target === this) closeSubmissionModal(); });
+
+    init();
+  </script>
+</body>
+</html>

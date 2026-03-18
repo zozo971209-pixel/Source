@@ -87,5 +87,79 @@
 
     <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
     <div id="auth-container" style="position: fixed; top: 20px; right: 20px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 10px; pointer-events: auto; flex-wrap: wrap; max-width: 400px; justify-content: flex-end;"></div>
+
+    <!-- 移除 React 內建的舊版 UI 元素，避免與新版 UI 重疊 -->
+    <style>
+      /* 強制隱藏 React IssueReportButton（fixed bottom-6 right-6 z-40）*/
+      .fixed.bottom-6.right-6 { display: none !important; }
+    </style>
+    <script>
+    (function removeOldUI() {
+      function hideOldElements() {
+        // 1. 移除 React IssueReportButton（fixed bottom-6 right-6 z-40）
+        //    特徵：className 包含 'fixed' 且包含 'bottom-6' 且包含 'right-6'
+        document.querySelectorAll('button, div').forEach(function(el) {
+          var cls = el.className || '';
+          if (typeof cls === 'string' &&
+              cls.includes('fixed') && cls.includes('bottom-6') && cls.includes('right-6')) {
+            el.style.setProperty('display', 'none', 'important');
+          }
+        });
+
+        // 2. 移除 React Navbar 中的「登入」按鈕（避免與右上角 auth-container 重疊）
+        //    特徵：Navbar 內的登入按鈕，className 包含 'bg-[#c9a86c]' 且文字為「登入」
+        document.querySelectorAll('button').forEach(function(btn) {
+          var cls = btn.className || '';
+          var txt = btn.textContent || btn.innerText || '';
+          if (cls.includes('bg-[#c9a86c]') && txt.trim() === '登入') {
+            btn.style.setProperty('display', 'none', 'important');
+          }
+          // 移除 Navbar 中的「管理員」按鈕（避免與左上角管理後台按鈕重疊）
+          if (cls.includes('bg-[#c9a86c]/10') && txt.includes('管理員')) {
+            btn.style.setProperty('display', 'none', 'important');
+          }
+          // 移除文字為「回報問題」或「問題回報」的固定定位按鈕
+          if ((txt.includes('回報問題') || txt.includes('問題回報')) &&
+              (cls.includes('fixed') || (btn.parentElement && (btn.parentElement.className||'').includes('fixed')))) {
+            btn.style.setProperty('display', 'none', 'important');
+          }
+        });
+
+        // 3. 移除 Navbar 中的「註冊」按鈕（若與 auth-container 重疊）
+        //    注意：只移除 Navbar 內的，不移除 auth-modal 中的
+        var navbar = document.querySelector('[class*="fixed top-0 left-0 right-0"]');
+        if (navbar) {
+          navbar.querySelectorAll('button').forEach(function(btn) {
+            var cls = btn.className || '';
+            var txt = (btn.textContent || btn.innerText || '').trim();
+            // 隱藏 Navbar 中的登入/註冊按鈕（保留其他功能按鈕）
+            if (txt === '登入' || txt === '註冊') {
+              btn.style.setProperty('display', 'none', 'important');
+            }
+          });
+        }
+      }
+
+      // React 渲染後多次執行確保覆蓋
+      [500, 1000, 2000, 4000].forEach(function(t) { setTimeout(hideOldElements, t); });
+
+      // MutationObserver 持續監控 DOM 變化
+      var observer = new MutationObserver(function(mutations) {
+        var needsCheck = mutations.some(function(m) { return m.addedNodes.length > 0; });
+        if (needsCheck) setTimeout(hideOldElements, 150);
+      });
+
+      function startObserver() {
+        observer.observe(document.body, { childList: true, subtree: true });
+        hideOldElements();
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startObserver);
+      } else {
+        startObserver();
+      }
+    })();
+    </script>
   </body>
 </html>
