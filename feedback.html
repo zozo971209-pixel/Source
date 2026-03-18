@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>意見回報 | 源哲學網</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111; color: #e0e0e0; min-height: 100vh; }
+    .nav { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #1a1a1a; border-bottom: 1px solid rgba(212,175,55,0.2); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 1000; }
+    .nav-logo { color: #d4af37; font-size: 22px; font-weight: 700; text-decoration: none; }
+    .nav-back { color: #d4af37; text-decoration: none; font-size: 14px; padding: 8px 16px; border: 1px solid rgba(212,175,55,0.3); border-radius: 6px; }
+    .container { max-width: 680px; margin: 80px auto 40px; padding: 0 20px; }
+    h1 { font-size: 28px; font-weight: 700; color: #d4af37; margin-bottom: 8px; }
+    .subtitle { color: #888; font-size: 15px; margin-bottom: 32px; }
+    .form-card { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.2); border-radius: 16px; padding: 32px; }
+    .type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+    .type-btn { padding: 16px; background: #2a2a2a; border: 2px solid #333; border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.3s; }
+    .type-btn:hover { border-color: rgba(212,175,55,0.5); }
+    .type-btn.active { border-color: #d4af37; background: rgba(212,175,55,0.08); }
+    .type-btn .icon { font-size: 24px; margin-bottom: 6px; }
+    .type-btn .label { font-size: 13px; font-weight: 600; color: #ccc; }
+    .type-btn.active .label { color: #d4af37; }
+    .form-group { margin-bottom: 20px; }
+    .form-group label { display: block; font-size: 14px; font-weight: 600; color: #d4af37; margin-bottom: 8px; }
+    .form-group label span { color: #888; font-weight: 400; font-size: 13px; }
+    .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 12px 16px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.3s; }
+    .form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: #d4af37; }
+    .form-group select option { background: #2a2a2a; }
+    .form-group textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
+    .btn { padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; width: 100%; margin-top: 8px; }
+    .btn-primary { background: linear-gradient(135deg, #d4af37, #a68c2f); color: #1a1a1a; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .success-box { background: rgba(76,175,80,0.1); border: 1px solid rgba(76,175,80,0.3); border-radius: 12px; padding: 32px; text-align: center; display: none; }
+    .success-box .icon { font-size: 48px; margin-bottom: 16px; }
+    .success-box h3 { color: #4caf50; font-size: 20px; margin-bottom: 8px; }
+    .success-box p { color: #888; margin-bottom: 20px; }
+    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 9999; display: none; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="./" class="nav-logo">源</a>
+    <a href="./" class="nav-back">← 返回首頁</a>
+  </nav>
+  <div class="container">
+    <h1>意見回報</h1>
+    <p class="subtitle">回報問題或提供建議，幫助我們改善「源」哲學網</p>
+    <div class="form-card" id="form-card">
+      <div class="form-group">
+        <label>回報類型</label>
+        <div class="type-grid">
+          <div class="type-btn active" onclick="selectType(this,'bug')">
+            <div class="icon">🐛</div>
+            <div class="label">問題回報</div>
+          </div>
+          <div class="type-btn" onclick="selectType(this,'suggestion')">
+            <div class="icon">💡</div>
+            <div class="label">功能建議</div>
+          </div>
+          <div class="type-btn" onclick="selectType(this,'content')">
+            <div class="icon">📝</div>
+            <div class="label">內容錯誤</div>
+          </div>
+          <div class="type-btn" onclick="selectType(this,'other')">
+            <div class="icon">💬</div>
+            <div class="label">其他</div>
+          </div>
+        </div>
+        <input type="hidden" id="feedback-type" value="bug">
+      </div>
+      <div class="form-group">
+        <label>標題 <span>（必填）</span></label>
+        <input type="text" id="fb-title" placeholder="簡短描述您的問題或建議" maxlength="200">
+      </div>
+      <div class="form-group">
+        <label>詳細說明 <span>（必填）</span></label>
+        <textarea id="fb-content" placeholder="請詳細描述問題的發生情況、重現步驟，或您的建議內容" maxlength="3000"></textarea>
+      </div>
+      <div class="form-group">
+        <label>發生頁面 <span>（選填）</span></label>
+        <input type="text" id="fb-page" placeholder="例如：首頁、哲學時代頁面、個人頁面">
+      </div>
+      <div class="form-group">
+        <label>聯絡信箱 <span>（選填，方便我們回覆您）</span></label>
+        <input type="email" id="fb-email" placeholder="your@email.com">
+      </div>
+      <button class="btn btn-primary" id="submit-btn" onclick="submitFeedback()">提交回報</button>
+    </div>
+    <div class="success-box" id="success-box">
+      <div class="icon">✅</div>
+      <h3>感謝您的回報！</h3>
+      <p>我們已收到您的意見，將盡快處理。您的反饋對我們非常重要。</p>
+      <button class="btn btn-primary" onclick="window.location.href='./'">返回首頁</button>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script>
+    const SB_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+    const SB_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+    let sb = null, user = null;
+
+    async function init() {
+      await new Promise(r => {
+        if (window.supabase && window.supabase.createClient) { r(); return; }
+        const t = setInterval(() => { if (window.supabase && window.supabase.createClient) { clearInterval(t); r(); } }, 50);
+        setTimeout(() => { clearInterval(t); r(); }, 5000);
+      });
+      sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true } });
+      const { data: { session } } = await sb.auth.getSession();
+      if (session) {
+        user = session.user;
+        document.getElementById('fb-email').value = user.email || '';
+      }
+    }
+
+    function selectType(el, type) {
+      document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+      document.getElementById('feedback-type').value = type;
+    }
+
+    async function submitFeedback() {
+      const title = document.getElementById('fb-title').value.trim();
+      const content = document.getElementById('fb-content').value.trim();
+      if (!title) { toast('請填寫標題', 'error'); return; }
+      if (!content || content.length < 10) { toast('請詳細說明問題或建議', 'error'); return; }
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true; btn.textContent = '提交中...';
+      const payload = {
+        user_id: user?.id || null,
+        report_type: document.getElementById('feedback-type').value,
+        title: title,
+        content: content,
+        page_url: document.getElementById('fb-page').value.trim(),
+        contact_email: document.getElementById('fb-email').value.trim() || user?.email || null,
+        status: 'pending'
+      };
+      const { error } = await sb.from('reports').insert(payload);
+      btn.disabled = false; btn.textContent = '提交回報';
+      if (error) { toast('提交失敗：' + error.message, 'error'); return; }
+      document.getElementById('form-card').style.display = 'none';
+      document.getElementById('success-box').style.display = 'block';
+    }
+
+    function toast(msg, type) {
+      const t = document.getElementById('toast');
+      const c = {success:'#1a3a1a',error:'#3a1a1a'}[type]||'#1a2a3a';
+      const b = {success:'#4caf50',error:'#f44336'}[type]||'#2196f3';
+      t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;background:'+c+';border:1px solid '+b+';color:'+b+';display:block;';
+      t.textContent = msg;
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+    init();
+  </script>
+</body>
+</html>

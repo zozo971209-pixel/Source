@@ -2,9 +2,16 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="0; url=/">
   <script>
-    window.location.href = '/' + window.location.pathname.slice(1) + window.location.search + window.location.hash;
+    (function () {
+      try {
+        sessionStorage.setItem(
+          "spa_redirect",
+          window.location.pathname + window.location.search + window.location.hash
+        );
+      } catch (e) {}
+      window.location.replace("/Source/");
+    })();
   </script>
 </head>
 <body>

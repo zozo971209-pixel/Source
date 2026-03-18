@@ -30,10 +30,62 @@
     <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css">
+    
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- 初始化 Supabase 客戶端 -->
+    <script>
+      (function() {
+        const SUPABASE_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+        function tryInit() {
+          if (window.supabase && window.supabase.createClient && !window.supabaseClient) {
+            window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+              auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+            });
+            return true;
+          }
+          return !!window.supabaseClient;
+        }
+        if (!tryInit()) {
+          let n = 0;
+          const t = setInterval(() => { if (tryInit() || ++n > 50) clearInterval(t); }, 100);
+        }
+        // SPA 路由恢復
+        try {
+          const to = sessionStorage.getItem('spa_redirect');
+          if (to) { sessionStorage.removeItem('spa_redirect'); history.replaceState(null, '', to); }
+        } catch(e) {}
+      })();
+    </script>
+    
+    <!-- React 應用 -->
+    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260317-1"></script>
+    
+    <!-- Supabase 認證橋接系統 -->
+    <script src="./assets/auth-supabase.js?v=20260317-1"></script>
+    
+    <!-- 樣式 -->
+    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260317-1">
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- 管理員後台按鈕 -->
+    <button id="admin-panel-btn" 
+            onclick="window.location.href='./admin/index.html'" 
+            style="position: fixed; top: 20px; left: 20px; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; z-index: 50002; display: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+      ⚙️ 管理後台
+    </button>
+
+    <!-- 意見回報按鈕 -->
+    <button onclick="window.location.href='./feedback.html'" 
+            style="position: fixed; bottom: 30px; right: 30px; padding: 12px 24px; background: linear-gradient(135deg, #d4af37 0%, #a68c2f 100%); color: #2a2a2a; border: none; border-radius: 50px; cursor: pointer; font-size: 14px; z-index: 50003; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+      💬 意見回報
+    </button>
+
+    <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
+    <div id="auth-container" style="position: fixed; top: 20px; right: 20px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 10px; pointer-events: auto; flex-wrap: wrap; max-width: 400px; justify-content: flex-end;"></div>
   </body>
 </html>

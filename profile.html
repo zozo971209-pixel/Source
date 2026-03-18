@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>個人頁面 | 源哲學網</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #111; color: #e0e0e0; min-height: 100vh; }
+    .nav { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #1a1a1a; border-bottom: 1px solid rgba(212,175,55,0.2); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 1000; }
+    .nav-logo { color: #d4af37; font-size: 22px; font-weight: 700; text-decoration: none; }
+    .nav-links { display: flex; gap: 12px; align-items: center; }
+    .nav-link { color: #888; text-decoration: none; font-size: 14px; padding: 6px 12px; border-radius: 6px; }
+    .nav-link:hover { color: #d4af37; }
+    .nav-link.primary { color: #d4af37; border: 1px solid rgba(212,175,55,0.3); }
+    .container { max-width: 900px; margin: 80px auto 40px; padding: 0 20px; }
+    /* Profile Header */
+    .profile-header { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.2); border-radius: 16px; padding: 32px; margin-bottom: 24px; display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+    .avatar-wrap { position: relative; flex-shrink: 0; }
+    .avatar { width: 90px; height: 90px; border-radius: 50%; background: linear-gradient(135deg, #d4af37, #a68c2f); display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 700; color: #1a1a1a; overflow: hidden; }
+    .avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .avatar-upload { position: absolute; bottom: 0; right: 0; width: 28px; height: 28px; background: #d4af37; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }
+    .profile-info { flex: 1; min-width: 200px; }
+    .profile-name { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+    .profile-email { font-size: 14px; color: #888; margin-bottom: 12px; }
+    .profile-bio { font-size: 14px; color: #bbb; line-height: 1.6; }
+    .profile-stats { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
+    .profile-stat { text-align: center; }
+    .profile-stat .num { font-size: 22px; font-weight: 700; color: #d4af37; }
+    .profile-stat .label { font-size: 12px; color: #888; }
+    .profile-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+    .btn { padding: 8px 18px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s; }
+    .btn-primary { background: linear-gradient(135deg, #d4af37, #a68c2f); color: #1a1a1a; }
+    .btn-secondary { background: transparent; color: #d4af37; border: 1px solid rgba(212,175,55,0.4); }
+    .btn-danger { background: transparent; color: #f44336; border: 1px solid rgba(244,67,54,0.3); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* Tabs */
+    .tab-nav { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 0; flex-wrap: wrap; }
+    .tab-btn { padding: 10px 20px; background: transparent; border: none; border-bottom: 2px solid transparent; color: #888; cursor: pointer; font-size: 14px; margin-bottom: -1px; }
+    .tab-btn.active { color: #d4af37; border-bottom-color: #d4af37; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    /* Cards */
+    .card { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.15); border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+    .card-item { padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: flex-start; gap: 12px; }
+    .card-item:last-child { border-bottom: none; }
+    .card-item-body { flex: 1; min-width: 0; }
+    .card-item-title { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-item-meta { font-size: 12px; color: #666; }
+    .card-item-actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge-pending { background: rgba(255,193,7,0.15); color: #ffc107; border: 1px solid rgba(255,193,7,0.3); }
+    .badge-approved { background: rgba(76,175,80,0.15); color: #4caf50; border: 1px solid rgba(76,175,80,0.3); }
+    .badge-rejected { background: rgba(244,67,54,0.15); color: #f44336; border: 1px solid rgba(244,67,54,0.3); }
+    .empty { text-align: center; padding: 48px 20px; color: #555; }
+    .empty .icon { font-size: 40px; margin-bottom: 12px; }
+    /* Edit Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: none; align-items: center; justify-content: center; padding: 20px; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.2); border-radius: 16px; padding: 28px; width: 100%; max-width: 480px; }
+    .modal h3 { font-size: 18px; color: #d4af37; margin-bottom: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; color: #888; margin-bottom: 6px; }
+    .form-group input, .form-group textarea { width: 100%; padding: 10px 14px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; }
+    .form-group input:focus, .form-group textarea:focus { border-color: #d4af37; }
+    .form-group textarea { resize: vertical; min-height: 80px; }
+    .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    /* Not logged in */
+    .not-logged-in { text-align: center; padding: 100px 20px; }
+    .not-logged-in h2 { color: #d4af37; font-size: 24px; margin-bottom: 16px; }
+    .not-logged-in p { color: #888; margin-bottom: 32px; }
+    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 9999; display: none; }
+    #avatar-input { display: none; }
+    .like-count { font-size: 12px; color: #888; }
+    @media (max-width: 600px) { .profile-header { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="./" class="nav-logo">源</a>
+    <div class="nav-links">
+      <a href="./" class="nav-link">首頁</a>
+      <a href="./submit.html" class="nav-link primary">投稿</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div id="not-logged-in" class="not-logged-in" style="display:none;">
+      <h2>請先登入</h2>
+      <p>登入後即可查看個人頁面</p>
+      <button class="btn btn-primary" onclick="window.location.href='./'">前往登入</button>
+    </div>
+
+    <div id="profile-content" style="display:none;">
+      <!-- 個人資料頭部 -->
+      <div class="profile-header">
+        <div class="avatar-wrap">
+          <div class="avatar" id="avatar-display">
+            <span id="avatar-initial">?</span>
+          </div>
+          <div class="avatar-upload" onclick="document.getElementById('avatar-input').click()" title="更換頭像">📷</div>
+          <input type="file" id="avatar-input" accept="image/*" onchange="uploadAvatar(this)">
+        </div>
+        <div class="profile-info">
+          <div class="profile-name" id="profile-name">載入中...</div>
+          <div class="profile-email" id="profile-email"></div>
+          <div class="profile-bio" id="profile-bio"></div>
+          <div class="profile-stats">
+            <div class="profile-stat"><div class="num" id="stat-submissions">0</div><div class="label">投稿</div></div>
+            <div class="profile-stat"><div class="num" id="stat-likes-given">0</div><div class="label">按讚</div></div>
+            <div class="profile-stat"><div class="num" id="stat-bookmarks">0</div><div class="label">收藏</div></div>
+            <div class="profile-stat"><div class="num" id="stat-likes-received">0</div><div class="label">獲讚</div></div>
+          </div>
+          <div class="profile-actions">
+            <button class="btn btn-secondary" onclick="openEditModal()">編輯個人資料</button>
+            <button class="btn btn-danger" onclick="confirmDeleteAccount()">刪除帳號</button>
+            <button class="btn btn-secondary" onclick="doLogout()">登出</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分頁 -->
+      <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchTab('submissions')">我的投稿</button>
+        <button class="tab-btn" onclick="switchTab('likes')">我的按讚</button>
+        <button class="tab-btn" onclick="switchTab('bookmarks')">我的收藏</button>
+      </div>
+
+      <!-- 投稿列表 -->
+      <div class="tab-panel active" id="tab-submissions">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+          <button class="btn btn-primary" onclick="window.location.href='./submit.html'">+ 新增投稿</button>
+        </div>
+        <div id="submissions-list"><div class="empty"><div class="icon">⏳</div><p>載入中...</p></div></div>
+      </div>
+
+      <!-- 按讚列表 -->
+      <div class="tab-panel" id="tab-likes">
+        <div id="likes-list"><div class="empty"><div class="icon">⏳</div><p>載入中...</p></div></div>
+      </div>
+
+      <!-- 收藏列表 -->
+      <div class="tab-panel" id="tab-bookmarks">
+        <div id="bookmarks-list"><div class="empty"><div class="icon">⏳</div><p>載入中...</p></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編輯個人資料 Modal -->
+  <div class="modal-overlay" id="edit-modal">
+    <div class="modal">
+      <h3>編輯個人資料</h3>
+      <div class="form-group">
+        <label>顯示名稱</label>
+        <input type="text" id="edit-name" placeholder="您的名稱" maxlength="50">
+      </div>
+      <div class="form-group">
+        <label>個人簡介</label>
+        <textarea id="edit-bio" placeholder="介紹一下自己..." maxlength="300"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveProfile()">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    const SB_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+    const SB_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+    let sb = null, user = null, userProfile = null;
+
+    async function init() {
+      await new Promise(r => {
+        if (window.supabase && window.supabase.createClient) { r(); return; }
+        const t = setInterval(() => { if (window.supabase && window.supabase.createClient) { clearInterval(t); r(); } }, 50);
+        setTimeout(() => { clearInterval(t); r(); }, 5000);
+      });
+      sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true } });
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { document.getElementById('not-logged-in').style.display = 'block'; return; }
+      user = session.user;
+      document.getElementById('profile-content').style.display = 'block';
+      await loadProfile();
+      loadSubmissions();
+    }
+
+    async function loadProfile() {
+      const { data } = await sb.from('users').select('*').eq('id', user.id).single();
+      userProfile = data || {};
+      const name = userProfile.name || userProfile.username || user.email.split('@')[0];
+      document.getElementById('profile-name').textContent = name;
+      document.getElementById('profile-email').textContent = user.email;
+      document.getElementById('profile-bio').textContent = userProfile.bio || '';
+      document.getElementById('avatar-initial').textContent = name.charAt(0).toUpperCase();
+      if (userProfile.avatar) {
+        document.getElementById('avatar-display').innerHTML = `<img src="${userProfile.avatar}" alt="頭像">`;
+      }
+      // Stats
+      const [subsR, likesGivenR, bookmarksR] = await Promise.all([
+        sb.from('submissions').select('id,likes_count', { count: 'exact' }).eq('user_id', user.id),
+        sb.from('content_likes').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+        sb.from('content_bookmarks').select('id', { count: 'exact', head: true }).eq('user_id', user.id)
+      ]);
+      document.getElementById('stat-submissions').textContent = subsR.count || 0;
+      document.getElementById('stat-likes-given').textContent = likesGivenR.count || 0;
+      document.getElementById('stat-bookmarks').textContent = bookmarksR.count || 0;
+      const totalLikes = (subsR.data || []).reduce((s, r) => s + (r.likes_count || 0), 0);
+      document.getElementById('stat-likes-received').textContent = totalLikes;
+    }
+
+    async function loadSubmissions() {
+      const { data } = await sb.from('submissions').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+      const el = document.getElementById('submissions-list');
+      if (!data || !data.length) {
+        el.innerHTML = '<div class="empty"><div class="icon">📝</div><p>尚無投稿</p><p style="font-size:13px;margin-top:8px;">分享您的哲學思想！</p></div>';
+        return;
+      }
+      el.innerHTML = '<div class="card">' + data.map(s => `
+        <div class="card-item">
+          <div class="card-item-body">
+            <div class="card-item-title">${esc(s.title)}</div>
+            <div class="card-item-meta">${catLabel(s.category)} · ${fmtDate(s.created_at)} · ❤️ ${s.likes_count||0} · ⭐ ${s.bookmarks_count||0}</div>
+            ${s.admin_note ? `<div style="margin-top:6px;font-size:12px;color:#888;background:#2a2a2a;padding:6px 10px;border-radius:6px;">管理員備註：${esc(s.admin_note)}</div>` : ''}
+          </div>
+          <div class="card-item-actions">
+            <span class="badge badge-${s.status}">${statusLabel(s.status)}</span>
+            ${s.status !== 'approved' ? `<button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="window.location.href='./submit.html?edit=${s.id}'">編輯</button>` : ''}
+          </div>
+        </div>
+      `).join('') + '</div>';
+    }
+
+    async function loadLikes() {
+      const { data } = await sb.from('content_likes').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+      const el = document.getElementById('likes-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">❤️</div><p>尚未按讚任何內容</p></div>'; return; }
+      el.innerHTML = '<div class="card">' + data.map(l => `
+        <div class="card-item">
+          <div class="card-item-body">
+            <div class="card-item-title">${esc(l.content_title || l.content_id)}</div>
+            <div class="card-item-meta">${contentTypeLabel(l.content_type)} · ${fmtDate(l.created_at)}</div>
+          </div>
+          <div class="card-item-actions">
+            <button class="btn btn-danger" style="padding:5px 10px;font-size:12px;" onclick="unlikeItem('${l.id}')">取消按讚</button>
+          </div>
+        </div>
+      `).join('') + '</div>';
+    }
+
+    async function loadBookmarks() {
+      const { data } = await sb.from('content_bookmarks').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+      const el = document.getElementById('bookmarks-list');
+      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">⭐</div><p>尚未收藏任何內容</p></div>'; return; }
+      el.innerHTML = '<div class="card">' + data.map(b => `
+        <div class="card-item">
+          <div class="card-item-body">
+            <div class="card-item-title">${esc(b.content_title || b.content_id)}</div>
+            <div class="card-item-meta">${contentTypeLabel(b.content_type)} · ${fmtDate(b.created_at)}</div>
+          </div>
+          <div class="card-item-actions">
+            <button class="btn btn-danger" style="padding:5px 10px;font-size:12px;" onclick="unbookmarkItem('${b.id}')">取消收藏</button>
+          </div>
+        </div>
+      `).join('') + '</div>';
+    }
+
+    async function unlikeItem(id) {
+      await sb.from('content_likes').delete().eq('id', id);
+      toast('已取消按讚', 'info');
+      loadLikes();
+    }
+
+    async function unbookmarkItem(id) {
+      await sb.from('content_bookmarks').delete().eq('id', id);
+      toast('已取消收藏', 'info');
+      loadBookmarks();
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + tab).classList.add('active');
+      event.currentTarget.classList.add('active');
+      if (tab === 'likes') loadLikes();
+      else if (tab === 'bookmarks') loadBookmarks();
+    }
+
+    function openEditModal() {
+      document.getElementById('edit-name').value = userProfile.name || userProfile.username || '';
+      document.getElementById('edit-bio').value = userProfile.bio || '';
+      document.getElementById('edit-modal').classList.add('show');
+    }
+
+    function closeEditModal() { document.getElementById('edit-modal').classList.remove('show'); }
+
+    async function saveProfile() {
+      const name = document.getElementById('edit-name').value.trim();
+      const bio = document.getElementById('edit-bio').value.trim();
+      if (!name) { toast('請填寫名稱', 'error'); return; }
+      const { error } = await sb.from('users').upsert({ id: user.id, email: user.email, name, bio, updated_at: new Date().toISOString() });
+      if (error) { toast('儲存失敗：' + error.message, 'error'); return; }
+      toast('個人資料已更新', 'success');
+      closeEditModal();
+      await loadProfile();
+    }
+
+    async function uploadAvatar(input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { toast('圖片大小不能超過 2MB', 'error'); return; }
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target.result;
+        const { error } = await sb.from('users').upsert({ id: user.id, email: user.email, avatar: base64 });
+        if (error) { toast('上傳失敗：' + error.message, 'error'); return; }
+        document.getElementById('avatar-display').innerHTML = `<img src="${base64}" alt="頭像">`;
+        toast('頭像已更新', 'success');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function confirmDeleteAccount() {
+      if (!confirm('確定要刪除帳號？此操作不可還原，您的所有投稿和資料將被刪除。')) return;
+      const confirmText = prompt('請輸入「確認刪除」以繼續：');
+      if (confirmText !== '確認刪除') { toast('已取消刪除', 'info'); return; }
+      const { error } = await sb.from('users').delete().eq('id', user.id);
+      if (error) { toast('刪除失敗：' + error.message, 'error'); return; }
+      await sb.auth.signOut();
+      toast('帳號已刪除', 'success');
+      setTimeout(() => window.location.href = './', 1500);
+    }
+
+    async function doLogout() {
+      await sb.auth.signOut();
+      window.location.href = './';
+    }
+
+    function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function fmtDate(s) { if (!s) return '-'; const d = new Date(s); return d.getFullYear()+'/'+(d.getMonth()+1).toString().padStart(2,'0')+'/'+d.getDate().toString().padStart(2,'0'); }
+    function catLabel(c) { return {philosopher:'新思想家',theory:'哲學理論',question:'哲學問題'}[c]||c||'-'; }
+    function statusLabel(s) { return {pending:'審核中',approved:'已新增',rejected:'未通過'}[s]||s||'-'; }
+    function contentTypeLabel(t) { return {philosopher:'哲學家',theory:'理論',question:'問題',argument:'論證',rebuttal:'批判與反駁',submission:'投稿'}[t]||t||'內容'; }
+
+    function toast(msg, type) {
+      const t = document.getElementById('toast');
+      const c = {success:'#1a3a1a',error:'#3a1a1a',info:'#1a2a3a'}[type]||'#1a2a3a';
+      const b = {success:'#4caf50',error:'#f44336',info:'#2196f3'}[type]||'#2196f3';
+      t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;background:'+c+';border:1px solid '+b+';color:'+b+';display:block;';
+      t.textContent = msg;
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+
+    document.getElementById('edit-modal').addEventListener('click', function(e) { if (e.target === this) closeEditModal(); });
+    init();
+  </script>
+</body>
+</html>

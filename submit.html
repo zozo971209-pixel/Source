@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>投稿 | 源哲學網</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; background: #111; color: #e0e0e0; min-height: 100vh; }
+    .nav { position: fixed; top: 0; left: 0; right: 0; height: 60px; background: #1a1a1a; border-bottom: 1px solid rgba(212,175,55,0.2); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 1000; }
+    .nav-logo { color: #d4af37; font-size: 22px; font-weight: 700; text-decoration: none; }
+    .nav-back { color: #d4af37; text-decoration: none; font-size: 14px; padding: 8px 16px; border: 1px solid rgba(212,175,55,0.3); border-radius: 6px; }
+    .container { max-width: 760px; margin: 80px auto 40px; padding: 0 20px; }
+    h1 { font-size: 28px; font-weight: 700; color: #d4af37; margin-bottom: 8px; }
+    .subtitle { color: #888; font-size: 15px; margin-bottom: 32px; }
+    .form-card { background: #1a1a1a; border: 1px solid rgba(212,175,55,0.2); border-radius: 16px; padding: 32px; }
+    .form-group { margin-bottom: 24px; }
+    .form-group label { display: block; font-size: 14px; font-weight: 600; color: #d4af37; margin-bottom: 8px; }
+    .form-group label span { color: #888; font-weight: 400; font-size: 13px; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 12px 16px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.3s; }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: #d4af37; }
+    .form-group select option { background: #2a2a2a; }
+    .form-group textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
+    .form-group textarea.large { min-height: 200px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .char-count { font-size: 12px; color: #666; text-align: right; margin-top: 4px; }
+    .btn { padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; }
+    .btn-primary { background: linear-gradient(135deg, #d4af37, #a68c2f); color: #1a1a1a; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: transparent; color: #d4af37; border: 1px solid rgba(212,175,55,0.4); }
+    .btn-group { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+    .notice { background: rgba(212,175,55,0.08); border: 1px solid rgba(212,175,55,0.2); border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; color: #bbb; line-height: 1.6; }
+    .notice strong { color: #d4af37; }
+    .not-logged-in { text-align: center; padding: 80px 20px; }
+    .not-logged-in h2 { color: #d4af37; font-size: 24px; margin-bottom: 16px; }
+    .not-logged-in p { color: #888; margin-bottom: 32px; }
+    #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 9999; display: none; }
+    @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="./" class="nav-logo">源</a>
+    <a href="./" class="nav-back">← 返回首頁</a>
+  </nav>
+  <div class="container">
+    <div id="not-logged-in" class="not-logged-in" style="display:none;">
+      <h2>請先登入</h2>
+      <p>登入後即可投稿，分享您的哲學思想</p>
+      <button class="btn btn-primary" onclick="window.location.href='./'">前往登入</button>
+    </div>
+    <div id="submit-content" style="display:none;">
+      <h1 id="page-title">新思想家投稿</h1>
+      <p class="subtitle">分享您的哲學理論或問題，審核通過後將顯示在「新思想家」分類中</p>
+      <div class="notice">
+        <strong>投稿說明：</strong><br>
+        投稿內容將由管理員審核，審核通過後才會顯示在網站上。<br>
+        請確保內容具有哲學深度，並遵守學術討論規範。審核結果可在個人頁面查看。
+      </div>
+      <div class="form-card">
+        <div class="form-group">
+          <label>投稿分類</label>
+          <select id="sub-category">
+            <option value="philosopher">新思想家（哲學家介紹）</option>
+            <option value="theory">哲學理論</option>
+            <option value="question">哲學問題</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>標題 <span>（必填）</span></label>
+          <input type="text" id="sub-title" placeholder="投稿標題" maxlength="200">
+          <div class="char-count"><span id="title-count">0</span>/200</div>
+        </div>
+        <div class="form-group">
+          <label>思想家姓名 <span>（若投稿哲學家介紹，請填寫）</span></label>
+          <input type="text" id="sub-philosopher" placeholder="哲學家或思想家的姓名">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>時代/地區 <span>（選填）</span></label>
+            <input type="text" id="sub-era" placeholder="例：當代 / 台灣">
+          </div>
+          <div class="form-group">
+            <label>相關理論領域 <span>（選填）</span></label>
+            <input type="text" id="sub-field" placeholder="例：存在主義、倫理學">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>主要內容 <span>（必填，請詳細說明）</span></label>
+          <textarea class="large" id="sub-content" placeholder="請詳細說明您的哲學理論、問題或思想家介紹。包括：核心主張、論證過程、與其他哲學的關係等。" maxlength="5000"></textarea>
+          <div class="char-count"><span id="content-count">0</span>/5000</div>
+        </div>
+        <div class="form-group">
+          <label>批判與反駁 <span>（選填）</span></label>
+          <textarea id="sub-rebuttal" placeholder="可以提供對此理論的批判觀點，或預期的反駁意見" maxlength="2000"></textarea>
+          <div class="char-count"><span id="rebuttal-count">0</span>/2000</div>
+        </div>
+        <div class="form-group">
+          <label>參考資料 <span>（選填）</span></label>
+          <textarea id="sub-refs" placeholder="列出參考書籍、論文或網站" maxlength="1000"></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="submit-btn" onclick="submitForm()">提交投稿</button>
+          <button class="btn btn-secondary" onclick="window.location.href='./profile.html'">查看我的投稿</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script>
+    const SB_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+    const SB_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+    let sb = null, user = null;
+    const editId = new URLSearchParams(window.location.search).get('edit');
+    async function init() {
+      await new Promise(r => {
+        if (window.supabase && window.supabase.createClient) { r(); return; }
+        const t = setInterval(() => { if (window.supabase && window.supabase.createClient) { clearInterval(t); r(); } }, 50);
+        setTimeout(() => { clearInterval(t); r(); }, 5000);
+      });
+      sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true } });
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) { document.getElementById('not-logged-in').style.display = 'block'; return; }
+      user = session.user;
+      document.getElementById('submit-content').style.display = 'block';
+      if (editId) loadEdit();
+      ['title','content','rebuttal'].forEach(f => {
+        document.getElementById('sub-'+f).addEventListener('input', () => {
+          document.getElementById(f+'-count').textContent = document.getElementById('sub-'+f).value.length;
+        });
+      });
+    }
+    async function loadEdit() {
+      document.getElementById('page-title').textContent = '編輯投稿';
+      const { data } = await sb.from('submissions').select('*').eq('id', editId).eq('user_id', user.id).single();
+      if (!data) { toast('找不到投稿或無權限編輯', 'error'); return; }
+      document.getElementById('sub-category').value = data.category || 'philosopher';
+      document.getElementById('sub-title').value = data.title || '';
+      document.getElementById('sub-philosopher').value = data.philosopher_name || '';
+      document.getElementById('sub-era').value = data.era || '';
+      document.getElementById('sub-field').value = data.field || '';
+      document.getElementById('sub-content').value = data.content || '';
+      document.getElementById('sub-rebuttal').value = data.rebuttal || '';
+      document.getElementById('sub-refs').value = data.ref_sources || '';
+      ['title','content','rebuttal'].forEach(f => {
+        document.getElementById(f+'-count').textContent = (document.getElementById('sub-'+f).value||'').length;
+      });
+      document.getElementById('submit-btn').textContent = '更新投稿';
+    }
+    async function submitForm() {
+      const title = document.getElementById('sub-title').value.trim();
+      const content = document.getElementById('sub-content').value.trim();
+      if (!title) { toast('請填寫標題', 'error'); return; }
+      if (!content || content.length < 50) { toast('主要內容至少需要 50 個字符', 'error'); return; }
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true; btn.textContent = '提交中...';
+      const payload = {
+        user_id: user.id,
+        category: document.getElementById('sub-category').value,
+        title,
+        philosopher_name: document.getElementById('sub-philosopher').value.trim(),
+        era: document.getElementById('sub-era').value.trim(),
+        field: document.getElementById('sub-field').value.trim(),
+        content,
+        rebuttal: document.getElementById('sub-rebuttal').value.trim(),
+        ref_sources: document.getElementById('sub-refs').value.trim(),
+        status: 'pending'
+      };
+      let error;
+      if (editId) {
+        ({ error } = await sb.from('submissions').update(payload).eq('id', editId).eq('user_id', user.id));
+      } else {
+        ({ error } = await sb.from('submissions').insert(payload));
+      }
+      btn.disabled = false; btn.textContent = editId ? '更新投稿' : '提交投稿';
+      if (error) { toast('提交失敗：' + error.message, 'error'); return; }
+      toast(editId ? '投稿已更新，等待審核' : '投稿成功！等待管理員審核', 'success');
+      setTimeout(() => window.location.href = './profile.html', 1500);
+    }
+    function toast(msg, type) {
+      const t = document.getElementById('toast');
+      const c = {success:'#1a3a1a',error:'#3a1a1a',info:'#1a2a3a'}[type]||'#1a2a3a';
+      const b = {success:'#4caf50',error:'#f44336',info:'#2196f3'}[type]||'#2196f3';
+      t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;background:'+c+';border:1px solid '+b+';color:'+b+';display:block;';
+      t.textContent = msg;
+      setTimeout(() => { t.style.display = 'none'; }, 3000);
+    }
+    init();
+  </script>
+</body>
+</html>
