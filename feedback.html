@@ -128,9 +128,11 @@
       if (!content || content.length < 10) { toast('請詳細說明問題或建議', 'error'); return; }
       const btn = document.getElementById('submit-btn');
       btn.disabled = true; btn.textContent = '提交中...';
+      const feedbackTypeVal = document.getElementById('feedback-type').value;
       const payload = {
         user_id: user?.id || null,
-        report_type: document.getElementById('feedback-type').value,
+        type: feedbackTypeVal,
+        report_type: feedbackTypeVal,
         title: title,
         content: content,
         page_url: document.getElementById('fb-page').value.trim(),

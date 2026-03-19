@@ -93,11 +93,52 @@
     <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
     <div id="auth-container" style="position: fixed; top: 10px; right: 10px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 6px; pointer-events: auto; flex-wrap: nowrap; max-width: calc(100vw - 20px); justify-content: flex-end; align-items: center;"></div>
     <style>
+      /* 認證容器按鈕基礎樣式 */
+      .auth-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+        border: none;
+        outline: none;
+      }
+      .auth-btn-user {
+        background: rgba(212, 175, 55, 0.15);
+        color: #d4af37;
+        border: 1px solid rgba(212, 175, 55, 0.4) !important;
+      }
+      .auth-btn-user:hover { background: rgba(212, 175, 55, 0.25) !important; }
+      .auth-btn-logout {
+        background: transparent;
+        color: #999;
+        border: 1px solid #555 !important;
+      }
+      .auth-btn-logout:hover { color: #fff !important; border-color: #999 !important; }
+      .auth-btn-login {
+        background: transparent;
+        color: #d4af37;
+        border: 1px solid rgba(212, 175, 55, 0.5) !important;
+      }
+      .auth-btn-login:hover { background: rgba(212, 175, 55, 0.1) !important; }
+      .auth-btn-register {
+        background: rgba(212, 175, 55, 0.15);
+        color: #d4af37;
+        border: 1px solid rgba(212, 175, 55, 0.5) !important;
+      }
+      .auth-btn-register:hover { background: rgba(212, 175, 55, 0.25) !important; }
       /* 手機版認證容器按鈕樣式縮小 */
       @media (max-width: 600px) {
         #auth-container { top: 8px; right: 8px; gap: 4px; }
-        #admin-panel-btn { top: 8px; left: 8px; padding: 7px 12px; font-size: 12px; }
-        #auth-container button { padding: 7px 10px !important; font-size: 12px !important; }
+        #admin-panel-btn { top: 8px; left: 8px; padding: 6px 10px !important; font-size: 11px !important; }
+        .auth-btn { padding: 6px 10px !important; font-size: 11px !important; }
+      }
+      @media (max-width: 400px) {
+        #admin-panel-btn { padding: 5px 8px !important; font-size: 10px !important; }
+        .auth-btn { padding: 5px 8px !important; font-size: 10px !important; }
+        #auth-container { gap: 3px; }
       }
     </style>
 
@@ -107,14 +148,26 @@
       const _push = history.pushState.bind(history);
       const _replace = history.replaceState.bind(history);
 
+      // 判斷路徑是否為 profile 或 admin 路由
+      // 支援 /profile、/Source/profile、/Source/profile?xxx 等各種形式
+      function isProfilePath(path) {
+        if (!path) return false;
+        return /(\/|^)profile(\?|#|$|\/)/i.test(path);
+      }
+      function isAdminPath(path) {
+        if (!path) return false;
+        if (path.includes('index.html') || path.includes('admin/')) return false;
+        return /(\/|^)admin(\?|#|$|\/)/i.test(path);
+      }
+
       function checkAndRedirect(url) {
         if (!url) return false;
         const path = typeof url === 'string' ? url : (url.pathname || '');
-        if (/\/profile(\?|#|$|\/)/i.test(path)) {
+        if (isProfilePath(path)) {
           window.location.replace('./profile.html');
           return true;
         }
-        if (/\/admin(\?|#|$)/i.test(path) && !path.includes('index.html')) {
+        if (isAdminPath(path)) {
           window.location.replace('./admin/index.html');
           return true;
         }
@@ -134,30 +187,44 @@
         checkAndRedirect(window.location.pathname);
       });
 
+      // 攔截所有點擊事件（包含 React Router <Link> 組件）
       document.addEventListener('click', function(e) {
+        // 攔截普通 <a> 標籤
         const a = e.target.closest('a[href]');
-        if (!a) return;
-        const href = a.getAttribute('href');
-        if (!href) return;
-        if (/\/profile(\?|#|$|\/)/i.test(href)) {
-          e.preventDefault(); e.stopPropagation();
-          window.location.href = './profile.html';
-        }
-        if (/\/admin(\?|#|$)/i.test(href) && !href.includes('index.html')) {
-          e.preventDefault(); e.stopPropagation();
-          window.location.href = './admin/index.html';
+        if (a) {
+          const href = a.getAttribute('href') || '';
+          if (isProfilePath(href)) {
+            e.preventDefault(); e.stopPropagation();
+            window.location.href = './profile.html';
+            return;
+          }
+          if (isAdminPath(href)) {
+            e.preventDefault(); e.stopPropagation();
+            window.location.href = './admin/index.html';
+            return;
+          }
         }
       }, true);
 
       // 白畫面防護：如果頁面已經是 /profile 或 /admin，立即重定向
       (function checkCurrentUrl() {
         const p = window.location.pathname;
-        if (/\/profile(\?|#|$|\/)/i.test(p)) {
+        if (isProfilePath(p)) {
           window.location.replace('./profile.html');
-        } else if (/\/admin(\?|#|$)/i.test(p) && !p.includes('index.html')) {
+        } else if (isAdminPath(p)) {
           window.location.replace('./admin/index.html');
         }
       })();
+
+      // 監控 URL 變化（React Router 可能用 popstate 以外的方式更新）
+      let lastPath = window.location.pathname;
+      setInterval(function() {
+        const currentPath = window.location.pathname;
+        if (currentPath !== lastPath) {
+          lastPath = currentPath;
+          checkAndRedirect(currentPath);
+        }
+      }, 100);
     })();
     </script>
 

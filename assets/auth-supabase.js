@@ -353,58 +353,32 @@
     if (currentUser && userProfile) {
       // 已登入
       const displayName = userProfile.name || userProfile.username || userProfile.email.split('@')[0];
+      // 限制顯示名稱長度，避免手機版溢出
+      const shortName = displayName.length > 8 ? displayName.substring(0, 8) + '...' : displayName;
 
       const userBtn = document.createElement('button');
-      userBtn.onclick = () => window.location.href = './profile.html';
-      userBtn.style.cssText = `
-        padding: 8px 16px; background: rgba(212, 175, 55, 0.15);
-        color: #d4af37; border: 1px solid rgba(212, 175, 55, 0.4);
-        border-radius: 6px; cursor: pointer; font-size: 13px;
-        transition: all 0.3s ease; font-weight: 500;
-      `;
-      userBtn.innerHTML = `👤 ${displayName}`;
-      userBtn.onmouseover = () => { userBtn.style.background = 'rgba(212, 175, 55, 0.25)'; };
-      userBtn.onmouseout = () => { userBtn.style.background = 'rgba(212, 175, 55, 0.15)'; };
+      userBtn.onclick = () => { window.location.href = './profile.html'; };
+      userBtn.className = 'auth-btn auth-btn-user';
+      userBtn.innerHTML = `👤 ${shortName}`;
       container.appendChild(userBtn);
 
       const logoutBtn = document.createElement('button');
       logoutBtn.onclick = window.logoutUser;
-      logoutBtn.style.cssText = `
-        padding: 8px 16px; background: transparent;
-        color: #999; border: 1px solid #555;
-        border-radius: 6px; cursor: pointer; font-size: 13px;
-        transition: all 0.3s ease;
-      `;
+      logoutBtn.className = 'auth-btn auth-btn-logout';
       logoutBtn.innerHTML = '登出';
-      logoutBtn.onmouseover = () => { logoutBtn.style.color = '#fff'; logoutBtn.style.borderColor = '#999'; };
-      logoutBtn.onmouseout = () => { logoutBtn.style.color = '#999'; logoutBtn.style.borderColor = '#555'; };
       container.appendChild(logoutBtn);
     } else {
       // 未登入
       const loginBtn = document.createElement('button');
       loginBtn.onclick = () => window.showLoginModal();
-      loginBtn.style.cssText = `
-        padding: 8px 16px; background: transparent;
-        color: #d4af37; border: 1px solid rgba(212, 175, 55, 0.5);
-        border-radius: 6px; cursor: pointer; font-size: 13px;
-        transition: all 0.3s ease;
-      `;
+      loginBtn.className = 'auth-btn auth-btn-login';
       loginBtn.innerHTML = '登入';
-      loginBtn.onmouseover = () => { loginBtn.style.background = 'rgba(212, 175, 55, 0.1)'; };
-      loginBtn.onmouseout = () => { loginBtn.style.background = 'transparent'; };
       container.appendChild(loginBtn);
 
       const regBtn = document.createElement('button');
       regBtn.onclick = () => window.showRegisterModal();
-      regBtn.style.cssText = `
-        padding: 8px 16px; background: rgba(212, 175, 55, 0.15);
-        color: #d4af37; border: 1px solid rgba(212, 175, 55, 0.5);
-        border-radius: 6px; cursor: pointer; font-size: 13px;
-        transition: all 0.3s ease;
-      `;
+      regBtn.className = 'auth-btn auth-btn-register';
       regBtn.innerHTML = '註冊';
-      regBtn.onmouseover = () => { regBtn.style.background = 'rgba(212, 175, 55, 0.25)'; };
-      regBtn.onmouseout = () => { regBtn.style.background = 'rgba(212, 175, 55, 0.15)'; };
       container.appendChild(regBtn);
     }
 
