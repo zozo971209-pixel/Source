@@ -80,7 +80,7 @@
     <!-- 管理員後台按鈕 -->
     <button id="admin-panel-btn" 
             onclick="window.location.href='./admin/index.html'" 
-            style="position: fixed; top: 20px; left: 20px; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; z-index: 50002; display: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+            style="position: fixed; top: 14px; left: 14px; padding: 9px 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 50002; display: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
       ⚙️ 管理後台
     </button>
 
@@ -91,26 +91,31 @@
     </button>
 
     <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
-    <div id="auth-container" style="position: fixed; top: 20px; right: 20px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 10px; pointer-events: auto; flex-wrap: wrap; max-width: 400px; justify-content: flex-end;"></div>
+    <div id="auth-container" style="position: fixed; top: 10px; right: 10px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 6px; pointer-events: auto; flex-wrap: nowrap; max-width: calc(100vw - 20px); justify-content: flex-end; align-items: center;"></div>
+    <style>
+      /* 手機版認證容器按鈕樣式縮小 */
+      @media (max-width: 600px) {
+        #auth-container { top: 8px; right: 8px; gap: 4px; }
+        #admin-panel-btn { top: 8px; left: 8px; padding: 7px 12px; font-size: 12px; }
+        #auth-container button { padding: 7px 10px !important; font-size: 12px !important; }
+      }
+    </style>
 
     <!-- 攔截 React Router 的 /profile 和 /admin 路由，重定向到實際 HTML 頁面 -->
     <script>
     (function interceptReactRoutes() {
-      // 攔截 React Router 的 history.pushState / replaceState
       const _push = history.pushState.bind(history);
       const _replace = history.replaceState.bind(history);
 
       function checkAndRedirect(url) {
         if (!url) return false;
         const path = typeof url === 'string' ? url : (url.pathname || '');
-        // 如果 React Router 試圖導向 /profile 或 /Source/profile
-        if (/\/profile$/.test(path) || /\/profile\//.test(path)) {
-          window.location.href = './profile.html';
+        if (/\/profile(\?|#|$|\/)/i.test(path)) {
+          window.location.replace('./profile.html');
           return true;
         }
-        // 如果 React Router 試圖導向 /admin（非 admin/index.html）
-        if (/\/admin$/.test(path) && !path.includes('index.html')) {
-          window.location.href = './admin/index.html';
+        if (/\/admin(\?|#|$)/i.test(path) && !path.includes('index.html')) {
+          window.location.replace('./admin/index.html');
           return true;
         }
         return false;
@@ -125,30 +130,34 @@
         return _replace(state, title, url);
       };
 
-      // 監聽 popstate 事件（瀏覽器前進/後退）
       window.addEventListener('popstate', function() {
         checkAndRedirect(window.location.pathname);
       });
 
-      // 攔截 React Router 的 <Link> 點擊（透過 click 事件委派）
       document.addEventListener('click', function(e) {
         const a = e.target.closest('a[href]');
         if (!a) return;
         const href = a.getAttribute('href');
         if (!href) return;
-        // 攔截指向 /profile 的連結
-        if (href === '/profile' || href === '/Source/profile' || href.endsWith('/profile')) {
-          e.preventDefault();
-          e.stopPropagation();
+        if (/\/profile(\?|#|$|\/)/i.test(href)) {
+          e.preventDefault(); e.stopPropagation();
           window.location.href = './profile.html';
         }
-        // 攔截指向 /admin 的連結
-        if ((href === '/admin' || href === '/Source/admin' || href.endsWith('/admin')) && !href.includes('index.html')) {
-          e.preventDefault();
-          e.stopPropagation();
+        if (/\/admin(\?|#|$)/i.test(href) && !href.includes('index.html')) {
+          e.preventDefault(); e.stopPropagation();
           window.location.href = './admin/index.html';
         }
       }, true);
+
+      // 白畫面防護：如果頁面已經是 /profile 或 /admin，立即重定向
+      (function checkCurrentUrl() {
+        const p = window.location.pathname;
+        if (/\/profile(\?|#|$|\/)/i.test(p)) {
+          window.location.replace('./profile.html');
+        } else if (/\/admin(\?|#|$)/i.test(p) && !p.includes('index.html')) {
+          window.location.replace('./admin/index.html');
+        }
+      })();
     })();
     </script>
 

@@ -710,3 +710,162 @@
     setTimeout(init, 500);
   }
 })();
+
+/**
+ * ==================== 動態資料橋接層 v1.0 ====================
+ * 讓前台 React 應用能讀取 Supabase 中管理員新增的內容
+ * 透過覆蓋 React 的資料讀取邏輯，注入 Supabase 資料
+ */
+(function dynamicDataBridge() {
+  'use strict';
+
+  // 等待 Supabase 客戶端就緒
+  function waitForSupabase(cb) {
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      if (window.supabaseClient) { clearInterval(t); cb(window.supabaseClient); }
+      else if (n > 100) clearInterval(t);
+    }, 100);
+  }
+
+  // 將 Supabase 資料注入到全域，供 React 讀取
+  async function injectSupabaseData(sb) {
+    try {
+      // 讀取所有哲學家（含地區和時代資訊）
+      const { data: philosophers } = await sb
+        .from('philosophers')
+        .select(`
+          id, name, name_en, birth_year, death_year, bio, avatar, era_id,
+          eras(id, name, region_id, regions(id, name))
+        `)
+        .order('birth_year', { ascending: true });
+
+      // 讀取所有理論
+      const { data: theories } = await sb
+        .from('theories')
+        .select(`
+          id, name, name_en, description, philosopher_id,
+          philosophers(id, name)
+        `)
+        .order('created_at', { ascending: true });
+
+      // 讀取所有論證
+      const { data: arguments_ } = await sb
+        .from('arguments')
+        .select(`
+          id, title, content, philosopher_id, theory_id, question_id,
+          philosophers(id, name),
+          theories(id, name)
+        `)
+        .order('created_at', { ascending: true });
+
+      // 讀取所有問題
+      const { data: questions } = await sb
+        .from('questions')
+        .select('id, title, description, category')
+        .order('created_at', { ascending: true });
+
+      // 讀取所有地區
+      const { data: regions } = await sb
+        .from('regions')
+        .select('id, name, description')
+        .order('name');
+
+      // 讀取所有時代
+      const { data: eras } = await sb
+        .from('eras')
+        .select('id, name, start_year, end_year, region_id, regions(name)')
+        .order('start_year', { ascending: true });
+
+      // 將資料存入全域，供 React 和其他腳本使用
+      window.__supabaseData = {
+        philosophers: philosophers || [],
+        theories: theories || [],
+        arguments: arguments_ || [],
+        questions: questions || [],
+        regions: regions || [],
+        eras: eras || [],
+        loadedAt: new Date().toISOString()
+      };
+
+      // 觸發自訂事件，通知 React 資料已就緒
+      window.dispatchEvent(new CustomEvent('supabaseDataLoaded', {
+        detail: window.__supabaseData
+      }));
+
+      // 嘗試注入到 React 的 localStorage（讓 React 能讀取）
+      injectToReactStorage(window.__supabaseData);
+
+    } catch (err) {
+      console.warn('[DataBridge] 載入資料失敗:', err);
+    }
+  }
+
+  function injectToReactStorage(data) {
+    try {
+      // 將哲學家資料格式化為 React 期望的格式
+      if (data.philosophers && data.philosophers.length > 0) {
+        const reactPhilosophers = data.philosophers.map(p => ({
+          id: p.id,
+          name: p.name,
+          nameEn: p.name_en || '',
+          birthYear: p.birth_year,
+          deathYear: p.death_year,
+          bio: p.bio || '',
+          avatar: p.avatar || '',
+          era: p.eras?.name || '',
+          region: p.eras?.regions?.name || '',
+          eraId: p.era_id
+        }));
+        localStorage.setItem('supabase_philosophers', JSON.stringify(reactPhilosophers));
+      }
+
+      // 將理論資料格式化
+      if (data.theories && data.theories.length > 0) {
+        const reactTheories = data.theories.map(t => ({
+          id: t.id,
+          name: t.name,
+          nameEn: t.name_en || '',
+          description: t.description || '',
+          philosopherId: t.philosopher_id,
+          philosopherName: t.philosophers?.name || ''
+        }));
+        localStorage.setItem('supabase_theories', JSON.stringify(reactTheories));
+      }
+
+      // 將論證資料格式化
+      if (data.arguments && data.arguments.length > 0) {
+        const reactArguments = data.arguments.map(a => ({
+          id: a.id,
+          title: a.title,
+          content: a.content || '',
+          philosopherId: a.philosopher_id,
+          theoryId: a.theory_id,
+          questionId: a.question_id,
+          philosopherName: a.philosophers?.name || '',
+          theoryName: a.theories?.name || ''
+        }));
+        localStorage.setItem('supabase_arguments', JSON.stringify(reactArguments));
+      }
+
+      // 觸發 storage 事件讓 React 重新讀取
+      window.dispatchEvent(new Event('storage'));
+    } catch (err) {
+      console.warn('[DataBridge] 注入 localStorage 失敗:', err);
+    }
+  }
+
+  // 提供全域 API 供外部調用
+  window.refreshSupabaseData = () => {
+    waitForSupabase(injectSupabaseData);
+  };
+
+  // 頁面載入時自動執行
+  waitForSupabase(sb => {
+    // 延遲 1 秒確保 React 已渲染
+    setTimeout(() => injectSupabaseData(sb), 1000);
+    // 每 5 分鐘自動刷新一次
+    setInterval(() => injectSupabaseData(sb), 5 * 60 * 1000);
+  });
+})();
