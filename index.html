@@ -64,252 +64,154 @@
         } catch(e) {}
       })();
     </script>
-    
-    <!-- React 應用 -->
-    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260317-1"></script>
-    
-    <!-- Supabase 認證橋接系統 -->
-    <script src="./assets/auth-supabase.js?v=20260317-1"></script>
-    
-    <!-- 樣式 -->
-    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260317-1">
-  </head>
-  <body>
-    <div id="root"></div>
 
-    <!-- 管理員後台按鈕 -->
-    <button id="admin-panel-btn" 
-            onclick="window.location.href='./admin/index.html'" 
-            style="position: fixed; top: 14px; left: 14px; padding: 9px 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; z-index: 50002; display: none; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-      ⚙️ 管理後台
-    </button>
-
-    <!-- 意見回報按鈕 -->
-    <button onclick="window.location.href='./feedback.html'" 
-            style="position: fixed; bottom: 30px; right: 30px; padding: 12px 24px; background: linear-gradient(135deg, #d4af37 0%, #a68c2f 100%); color: #2a2a2a; border: none; border-radius: 50px; cursor: pointer; font-size: 14px; z-index: 50003; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
-      💬 意見回報
-    </button>
-
-    <!-- 認證容器 - 動態內容由 updateUI() 管理 -->
-    <div id="auth-container" style="position: fixed; top: 10px; right: 10px; z-index: 50001; background: transparent; padding: 0; border-radius: 8px; display: flex; gap: 6px; pointer-events: auto; flex-wrap: nowrap; max-width: calc(100vw - 20px); justify-content: flex-end; align-items: center;"></div>
-    <style>
-      /* 認證容器按鈕基礎樣式 */
-      .auth-btn {
-        padding: 8px 16px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 500;
-        transition: all 0.3s ease;
-        white-space: nowrap;
-        border: none;
-        outline: none;
-      }
-      .auth-btn-user {
-        background: rgba(212, 175, 55, 0.15);
-        color: #d4af37;
-        border: 1px solid rgba(212, 175, 55, 0.4) !important;
-      }
-      .auth-btn-user:hover { background: rgba(212, 175, 55, 0.25) !important; }
-      .auth-btn-logout {
-        background: transparent;
-        color: #999;
-        border: 1px solid #555 !important;
-      }
-      .auth-btn-logout:hover { color: #fff !important; border-color: #999 !important; }
-      .auth-btn-login {
-        background: transparent;
-        color: #d4af37;
-        border: 1px solid rgba(212, 175, 55, 0.5) !important;
-      }
-      .auth-btn-login:hover { background: rgba(212, 175, 55, 0.1) !important; }
-      .auth-btn-register {
-        background: rgba(212, 175, 55, 0.15);
-        color: #d4af37;
-        border: 1px solid rgba(212, 175, 55, 0.5) !important;
-      }
-      .auth-btn-register:hover { background: rgba(212, 175, 55, 0.25) !important; }
-      /* 手機版認證容器按鈕樣式縮小 */
-      @media (max-width: 600px) {
-        #auth-container { top: 8px; right: 8px; gap: 4px; }
-        #admin-panel-btn { top: 8px; left: 8px; padding: 6px 10px !important; font-size: 11px !important; }
-        .auth-btn { padding: 6px 10px !important; font-size: 11px !important; }
-      }
-      @media (max-width: 400px) {
-        #admin-panel-btn { padding: 5px 8px !important; font-size: 10px !important; }
-        .auth-btn { padding: 5px 8px !important; font-size: 10px !important; }
-        #auth-container { gap: 3px; }
-      }
-    </style>
-
-    <!-- 攔截 React Router 的 /profile 和 /admin 路由，重定向到實際 HTML 頁面 -->
+    <!-- ===== 白畫面防護：攔截 React Router 的 /profile 和 /admin 路由 ===== -->
     <script>
-    (function interceptReactRoutes() {
-      const _push = history.pushState.bind(history);
-      const _replace = history.replaceState.bind(history);
+    (function() {
+      'use strict';
 
-      // 判斷路徑是否為 profile 或 admin 路由
-      // 支援 /profile、/Source/profile、/Source/profile?xxx 等各種形式
-      function isProfilePath(path) {
-        if (!path) return false;
-        return /(\/|^)profile(\?|#|$|\/)/i.test(path);
+      // 判斷路徑是否需要重定向
+      function isProfilePath(p) {
+        return p && /[\/]profile([\/\?#]|$)/i.test(p);
       }
-      function isAdminPath(path) {
-        if (!path) return false;
-        if (path.includes('index.html') || path.includes('admin/')) return false;
-        return /(\/|^)admin(\?|#|$|\/)/i.test(path);
+      function isAdminRoutePath(p) {
+        // 只攔截 React 的 /admin 路由，不攔截 /admin/ 目錄（已有 index.html）
+        return p && /[\/]admin([\/\?#]|$)/i.test(p) && !p.includes('/admin/') && !p.includes('index.html');
       }
 
-      function checkAndRedirect(url) {
-        if (!url) return false;
-        const path = typeof url === 'string' ? url : (url.pathname || '');
+      function redirect(path) {
         if (isProfilePath(path)) {
           window.location.replace('./profile.html');
           return true;
         }
-        if (isAdminPath(path)) {
+        if (isAdminRoutePath(path)) {
           window.location.replace('./admin/index.html');
           return true;
         }
         return false;
       }
 
+      // 1. 攔截 history.pushState / replaceState
+      const origPush = history.pushState.bind(history);
+      const origReplace = history.replaceState.bind(history);
       history.pushState = function(state, title, url) {
-        if (checkAndRedirect(url)) return;
-        return _push(state, title, url);
+        if (url && redirect(typeof url === 'string' ? url : (url.pathname || ''))) return;
+        return origPush(state, title, url);
       };
       history.replaceState = function(state, title, url) {
-        if (checkAndRedirect(url)) return;
-        return _replace(state, title, url);
+        if (url && redirect(typeof url === 'string' ? url : (url.pathname || ''))) return;
+        return origReplace(state, title, url);
       };
 
+      // 2. 攔截 popstate
       window.addEventListener('popstate', function() {
-        checkAndRedirect(window.location.pathname);
+        redirect(window.location.pathname);
       });
 
-      // 攔截所有點擊事件（包含 React Router <Link> 組件）
+      // 3. 攔截所有點擊（包含 React Router <Link>）
       document.addEventListener('click', function(e) {
-        // 攔截普通 <a> 標籤
-        const a = e.target.closest('a[href]');
-        if (a) {
-          const href = a.getAttribute('href') || '';
-          if (isProfilePath(href)) {
-            e.preventDefault(); e.stopPropagation();
-            window.location.href = './profile.html';
-            return;
+        // 找到最近的 <a> 標籤
+        let el = e.target;
+        while (el && el !== document) {
+          if (el.tagName === 'A') {
+            const href = el.getAttribute('href') || '';
+            if (isProfilePath(href) || isProfilePath(el.pathname)) {
+              e.preventDefault(); e.stopImmediatePropagation();
+              window.location.href = './profile.html';
+              return;
+            }
+            if (isAdminRoutePath(href) || isAdminRoutePath(el.pathname)) {
+              e.preventDefault(); e.stopImmediatePropagation();
+              window.location.href = './admin/index.html';
+              return;
+            }
+            break;
           }
-          if (isAdminPath(href)) {
-            e.preventDefault(); e.stopPropagation();
-            window.location.href = './admin/index.html';
-            return;
-          }
+          el = el.parentElement;
         }
       }, true);
 
-      // 白畫面防護：如果頁面已經是 /profile 或 /admin，立即重定向
-      (function checkCurrentUrl() {
-        const p = window.location.pathname;
-        if (isProfilePath(p)) {
+      // 4. MutationObserver：監控 React 渲染，偵測到 profile/admin 頁面就立即重定向
+      // React 渲染 profile 頁面時，會出現特定的文字或元素
+      var profileKeywords = ['editProfile', '個人資料', 'myContributions', '我的投稿', '我的按讚'];
+      var adminKeywords = ['管理員後台', 'AdminPage', 'admin-dashboard'];
+      var redirected = false;
+
+      function checkDOMForProfilePage() {
+        if (redirected) return;
+        var path = window.location.pathname;
+        if (!isProfilePath(path) && !isAdminRoutePath(path)) return;
+
+        if (isProfilePath(path)) {
+          redirected = true;
           window.location.replace('./profile.html');
-        } else if (isAdminPath(p)) {
+        } else if (isAdminRoutePath(path)) {
+          redirected = true;
           window.location.replace('./admin/index.html');
         }
-      })();
+      }
 
-      // 監控 URL 變化（React Router 可能用 popstate 以外的方式更新）
-      let lastPath = window.location.pathname;
+      // 5. 輪詢 URL（最可靠的方式）
+      var lastPath = window.location.pathname;
       setInterval(function() {
-        const currentPath = window.location.pathname;
-        if (currentPath !== lastPath) {
-          lastPath = currentPath;
-          checkAndRedirect(currentPath);
+        var p = window.location.pathname;
+        if (p !== lastPath) {
+          lastPath = p;
+          redirect(p);
         }
-      }, 100);
+      }, 50);
+
+      // 6. 初始檢查
+      redirect(window.location.pathname);
     })();
     </script>
+    
+    <!-- React 應用 -->
+    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260319-1"></script>
+    
+    <!-- Supabase 認證橋接系統 -->
+    <script src="./assets/auth-supabase.js?v=20260319-1"></script>
+    
+    <!-- 樣式 -->
+    <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260319-1">
 
-    <!-- 移除 React 內建的舊版 UI 元素，避免與新版 UI 重疊 -->
+    <!-- 隱藏 React 內建的重複元素 -->
     <style>
-      /* 強制隱藏 React IssueReportButton（fixed bottom-6 right-6 z-40）*/
-      .fixed.bottom-6.right-6 { display: none !important; }
-      /* 強制隱藏 Navbar 中的用戶下拉選單（data-slot=dropdown-menu）*/
-      [data-slot="dropdown-menu"] { display: none !important; }
-      /* 強制隱藏 Navbar 中的登入/管理員按鈕（保留 auth-container 中的）*/
-      header [data-slot="dropdown-menu-trigger"] { display: none !important; }
+      /* 隱藏 React 內建的「回報問題」固定按鈕（右下角） */
+      .fixed.bottom-6.right-6.z-40 { display: none !important; }
     </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- 意見回報按鈕（右下角，不與 React Navbar 重疊） -->
+    <button onclick="window.location.href='./feedback.html'" 
+            style="position: fixed; bottom: 30px; right: 30px; padding: 12px 24px; background: linear-gradient(135deg, #d4af37 0%, #a68c2f 100%); color: #2a2a2a; border: none; border-radius: 50px; cursor: pointer; font-size: 14px; z-index: 50003; box-shadow: 0 4px 15px rgba(212, 175, 55, 0.3); font-weight: 500; transition: all 0.3s ease;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+      💬 意見回報
+    </button>
+
+    <!-- Supabase 認證橋接腳本（確保 React 的認證狀態與 Supabase 同步） -->
     <script>
-    (function removeOldUI() {
-      function hideOldElements() {
-        // 1. 移除 React IssueReportButton（fixed bottom-6 right-6 z-40）
+    // 隱藏 React 內建的固定按鈕（避免與意見回報按鈕重疊）
+    (function hideReactFixedButtons() {
+      function hide() {
         document.querySelectorAll('button, div').forEach(function(el) {
-          var cls = el.className || '';
-          if (typeof cls === 'string' &&
-              cls.includes('fixed') && cls.includes('bottom-6') && cls.includes('right-6')) {
+          var cls = (el.className && typeof el.className === 'string') ? el.className : '';
+          var txt = (el.textContent || '').trim();
+          // 隱藏 React 內建的「回報問題」按鈕
+          if (cls.includes('fixed') && cls.includes('bottom-6') && cls.includes('right-6')) {
+            el.style.setProperty('display', 'none', 'important');
+          }
+          // 隱藏 React 內建的「回報問題」按鈕（文字匹配）
+          if ((txt === '回報問題' || txt === '問題回報') && cls.includes('fixed')) {
             el.style.setProperty('display', 'none', 'important');
           }
         });
-
-        // 2. 精確移除 Navbar 中的用戶下拉選單（data-slot="dropdown-menu"）
-        //    這是 React Navbar 中的 DropdownMenu 組件（個人資料/我的投稿/我的收藏/登出）
-        document.querySelectorAll('[data-slot="dropdown-menu"]').forEach(function(el) {
-          el.style.setProperty('display', 'none', 'important');
-        });
-
-        // 3. 移除 Navbar 中的「登入」按鈕（避免與右上角 auth-container 重疊）
-        document.querySelectorAll('button').forEach(function(btn) {
-          var cls = btn.className || '';
-          var txt = (btn.textContent || btn.innerText || '').trim();
-          // 移除 Navbar 中的「管理員」按鈕（避免與左上角管理後台按鈕重疊）
-          if (cls.includes('bg-[#c9a86c]/10') && txt.includes('管理員')) {
-            btn.style.setProperty('display', 'none', 'important');
-          }
-          // 移除文字為「回報問題」或「問題回報」的固定定位按鈕
-          if ((txt.includes('回報問題') || txt.includes('問題回報')) &&
-              (cls.includes('fixed') || (btn.parentElement && (btn.parentElement.className||'').includes('fixed')))) {
-            btn.style.setProperty('display', 'none', 'important');
-          }
-        });
-
-        // 4. 移除 Navbar 中的「登入/註冊」按鈕（只移除 header/nav 內的）
-        var navbar = document.querySelector('header[role="banner"]');
-        if (navbar) {
-          navbar.querySelectorAll('button').forEach(function(btn) {
-            var cls = btn.className || '';
-            var txt = (btn.textContent || btn.innerText || '').trim();
-            if (txt === '登入' || txt === '註冊') {
-              btn.style.setProperty('display', 'none', 'important');
-            }
-            // 移除 Navbar 中的管理員連結按鈕
-            if (txt === '管理員' || (txt.includes('管理員') && cls.includes('ghost'))) {
-              btn.style.setProperty('display', 'none', 'important');
-            }
-          });
-          // 移除 Navbar 中的 avatar 按鈕（用戶頭像觸發器）
-          navbar.querySelectorAll('[data-slot="dropdown-menu-trigger"]').forEach(function(el) {
-            el.style.setProperty('display', 'none', 'important');
-          });
-        }
       }
-
-      // React 渲染後多次執行確保覆蓋
-      [500, 1000, 2000, 4000].forEach(function(t) { setTimeout(hideOldElements, t); });
-
-      // MutationObserver 持續監控 DOM 變化
-      var observer = new MutationObserver(function(mutations) {
-        var needsCheck = mutations.some(function(m) { return m.addedNodes.length > 0; });
-        if (needsCheck) setTimeout(hideOldElements, 150);
-      });
-
-      function startObserver() {
-        observer.observe(document.body, { childList: true, subtree: true });
-        hideOldElements();
-      }
-
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startObserver);
-      } else {
-        startObserver();
-      }
+      [500, 1000, 2000, 3000].forEach(t => setTimeout(hide, t));
+      var obs = new MutationObserver(() => setTimeout(hide, 100));
+      if (document.body) obs.observe(document.body, { childList: true, subtree: true });
+      else document.addEventListener('DOMContentLoaded', () => obs.observe(document.body, { childList: true, subtree: true }));
     })();
     </script>
   </body>

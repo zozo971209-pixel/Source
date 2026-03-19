@@ -129,13 +129,14 @@
       const btn = document.getElementById('submit-btn');
       btn.disabled = true; btn.textContent = '提交中...';
       const feedbackTypeVal = document.getElementById('feedback-type').value;
+      // 注意：不傳 user_id，避免外鍵約束錯誤（users 表格可能尚未同步）
+      // 改用 contact_email 識別用戶
       const payload = {
-        user_id: user?.id || null,
         type: feedbackTypeVal,
         report_type: feedbackTypeVal,
         title: title,
         content: content,
-        page_url: document.getElementById('fb-page').value.trim(),
+        page_url: document.getElementById('fb-page').value.trim() || window.location.href,
         contact_email: document.getElementById('fb-email').value.trim() || user?.email || null,
         status: 'pending'
       };

@@ -1,7 +1,11 @@
 /**
- * Supabase 認證橋接系統 v3.0
- * 攔截 React 的 localStorage 認證，並同步到 Supabase
- * 同時提供完整的用戶認證功能
+ * Supabase 認證橋接系統 v4.0
+ * 
+ * 策略：讓 React 的原生 Navbar UI 正常工作
+ * - 不建立外部按鈕（避免與 React Navbar 重疊）
+ * - 只負責 Supabase ↔ React localStorage 的認證狀態同步
+ * - React 的登入/登出/個人資料按鈕由 React 自己管理
+ * - 攔截 React 的認證操作，同步到 Supabase
  */
 (function() {
   'use strict';
@@ -13,19 +17,16 @@
   let supabase = null;
   let currentUser = null;
   let userProfile = null;
-  let isInitialized = false;
 
   // ==================== 初始化 ====================
-  function waitForSDK() {
+  async function waitForSDK() {
     return new Promise(resolve => {
-      let attempts = 0;
-      const check = setInterval(() => {
-        attempts++;
-        if (window.supabaseClient) {
-          clearInterval(check);
-          resolve(window.supabaseClient);
-        } else if (window.supabase && window.supabase.createClient) {
-          clearInterval(check);
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        if (window.supabaseClient) { clearInterval(t); resolve(window.supabaseClient); return; }
+        if (window.supabase && window.supabase.createClient) {
+          clearInterval(t);
           const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: {
               persistSession: true,
@@ -36,11 +37,9 @@
           });
           window.supabaseClient = client;
           resolve(client);
-        } else if (attempts > 100) {
-          clearInterval(check);
-          console.error('[Auth] Supabase SDK 加載超時');
-          resolve(null);
+          return;
         }
+        if (n > 100) { clearInterval(t); resolve(null); }
       }, 50);
     });
   }
@@ -48,23 +47,22 @@
   async function init() {
     try {
       supabase = await waitForSDK();
-      if (!supabase) return;
+      if (!supabase) { console.error('[Auth] Supabase SDK 加載失敗'); return; }
 
       // 監聽認證狀態變化
       supabase.auth.onAuthStateChange(async (event, session) => {
         if (session) {
           currentUser = session.user;
           await syncUserProfile(currentUser);
-          // 同步到 React 的 localStorage
           syncToReactAuth(userProfile);
+          // 通知 React 重新渲染
+          window.dispatchEvent(new Event('storage'));
         } else {
           currentUser = null;
           userProfile = null;
-          // 清除 React 的 localStorage
           localStorage.removeItem('user');
+          window.dispatchEvent(new Event('storage'));
         }
-        updateUI();
-        isInitialized = true;
       });
 
       // 檢查現有會話
@@ -73,13 +71,11 @@
         currentUser = session.user;
         await syncUserProfile(currentUser);
         syncToReactAuth(userProfile);
+        window.dispatchEvent(new Event('storage'));
       }
 
-      // 攔截 React 的登入/註冊
-      interceptReactAuth();
-
-      updateUI();
-      isInitialized = true;
+      // 攔截 React 的登入/登出操作
+      interceptReactLoginLogout();
 
     } catch (err) {
       console.error('[Auth] 初始化失敗:', err);
@@ -128,6 +124,7 @@
     }
   }
 
+  // 同步到 React 的 localStorage（讓 React 的 useAuth hook 能讀取）
   function syncToReactAuth(profile) {
     if (!profile) return;
     const reactUser = {
@@ -141,48 +138,53 @@
       isAdmin: profile.is_admin || profile.email === ADMIN_EMAIL
     };
     localStorage.setItem('user', JSON.stringify(reactUser));
-
-    // 更新 registered_users 以讓 React 的 login 函數能找到用戶
-    const users = JSON.parse(localStorage.getItem('registered_users') || '[]');
-    const idx = users.findIndex(u => u.email === profile.email);
-    if (idx >= 0) {
-      users[idx] = { ...users[idx], ...reactUser, password: users[idx].password };
-    } else {
-      users.push({ ...reactUser, password: '__supabase__' });
-    }
-    localStorage.setItem('registered_users', JSON.stringify(users));
+    // 更新 registered_users 讓 React 的 login 函數能找到用戶
+    try {
+      const users = JSON.parse(localStorage.getItem('registered_users') || '[]');
+      const idx = users.findIndex(u => u.email === profile.email);
+      if (idx >= 0) {
+        users[idx] = { ...users[idx], ...reactUser, password: users[idx].password };
+      } else {
+        users.push({ ...reactUser, password: '__supabase__' });
+      }
+      localStorage.setItem('registered_users', JSON.stringify(users));
+    } catch(e) {}
   }
 
-  // ==================== 攔截 React 認證 ====================
-  function interceptReactAuth() {
-    // 攔截 React 的登入對話框提交
-    // 通過監聽 DOM 變化來攔截登入表單
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === 1) {
-            // 查找登入按鈕
-            const loginBtns = node.querySelectorAll ? node.querySelectorAll('button') : [];
-            loginBtns.forEach(btn => {
-              if (btn.textContent && (btn.textContent.includes('登入') || btn.textContent.includes('Login'))) {
-                // 不攔截，讓 React 自己處理，但在之後同步到 Supabase
-              }
-            });
+  // ==================== 攔截 React 認證操作 ====================
+  function interceptReactLoginLogout() {
+    // 攔截 localStorage.setItem，同步 React 的登入到 Supabase
+    const origSetItem = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function(key, value) {
+      origSetItem(key, value);
+      if (key === 'user') {
+        try {
+          const userData = JSON.parse(value);
+          if (userData && userData.email && !currentUser) {
+            // React 設置了用戶，嘗試同步到 Supabase
+            // 這裡不做任何操作，因為 Supabase 的 onAuthStateChange 會處理
           }
-        });
-      });
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+        } catch(e) {}
+      }
+    };
+
+    // 攔截 localStorage.removeItem，同步 React 的登出到 Supabase
+    const origRemoveItem = localStorage.removeItem.bind(localStorage);
+    localStorage.removeItem = function(key) {
+      origRemoveItem(key);
+      if (key === 'user' && currentUser && supabase) {
+        // React 登出了，同步到 Supabase
+        supabase.auth.signOut().catch(() => {});
+        currentUser = null;
+        userProfile = null;
+      }
+    };
   }
 
   // ==================== 公開 API ====================
-
-  // 登入
+  // 登入（供 React 的登入對話框調用）
   window.loginUser = async (email, password) => {
-    if (!supabase) {
-      showToast('系統初始化中，請稍後再試', 'error');
-      return false;
-    }
+    if (!supabase) { showToast('系統初始化中，請稍後再試', 'error'); return false; }
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
@@ -198,10 +200,8 @@
       currentUser = data.user;
       await syncUserProfile(currentUser);
       syncToReactAuth(userProfile);
-      updateUI();
-      showToast('登入成功！歡迎回來', 'success');
-      // 觸發 React 重新渲染
       window.dispatchEvent(new Event('storage'));
+      showToast('登入成功！歡迎回來', 'success');
       return true;
     } catch (err) {
       showToast('登入失敗，請稍後再試', 'error');
@@ -210,73 +210,24 @@
   };
 
   // 註冊
-  window.registerUser = async (email, password, username, realName) => {
-    if (!supabase) {
-      showToast('系統初始化中，請稍後再試', 'error');
-      return false;
-    }
-    if (!email || !password || !username) {
-      showToast('請填寫完整資訊', 'error');
-      return false;
-    }
-    if (password.length < 8) {
-      showToast('密碼至少需要 8 個字符', 'error');
-      return false;
-    }
-
+  window.registerUser = async (email, password, username) => {
+    if (!supabase) { showToast('系統初始化中，請稍後再試', 'error'); return false; }
+    if (!email || !password || !username) { showToast('請填寫完整資訊', 'error'); return false; }
     try {
-      // 先檢查 username 是否重複
-      const { data: existing } = await supabase
-        .from('users')
-        .select('id')
-        .eq('username', username)
-        .single();
-      if (existing) {
-        showToast('此帳號名稱已被使用', 'error');
-        return false;
-      }
-
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            name: realName || username,
-            username: username
-          }
-        }
+        email, password,
+        options: { data: { username, name: username } }
       });
-
-      if (error) {
-        if (error.message.includes('already registered')) {
-          showToast('此信箱已被註冊', 'error');
-        } else {
-          showToast('註冊失敗：' + error.message, 'error');
-        }
-        return false;
-      }
-
+      if (error) { showToast('註冊失敗：' + error.message, 'error'); return false; }
       if (data.user) {
         currentUser = data.user;
-        // 手動創建用戶資料（因為 email 確認可能未啟用）
-        const newProfile = {
-          id: data.user.id,
-          email: email,
-          name: realName || username,
-          username: username,
-          role: 'user',
-          is_admin: false,
-          avatar: '',
-          bio: ''
-        };
-        await supabase.from('users').upsert(newProfile);
-        userProfile = newProfile;
+        await syncUserProfile(currentUser);
         syncToReactAuth(userProfile);
-        updateUI();
-        showToast('註冊成功！歡迎加入源哲學網', 'success');
         window.dispatchEvent(new Event('storage'));
+        showToast('註冊成功！', 'success');
         return true;
       }
+      return false;
     } catch (err) {
       showToast('註冊失敗，請稍後再試', 'error');
       return false;
@@ -285,561 +236,215 @@
 
   // 登出
   window.logoutUser = async () => {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
+    if (supabase) await supabase.auth.signOut();
     currentUser = null;
     userProfile = null;
     localStorage.removeItem('user');
-    localStorage.removeItem('registered_users');
-    updateUI();
-    showToast('已成功登出', 'success');
     window.dispatchEvent(new Event('storage'));
+    showToast('已登出', 'success');
+    setTimeout(() => window.location.href = './', 500);
+  };
+
+  // 檢查是否為管理員
+  window.isAdmin = () => {
+    if (currentUser && currentUser.email === ADMIN_EMAIL) return true;
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      return u.isAdmin || u.email === ADMIN_EMAIL;
+    } catch(e) { return false; }
   };
 
   // 獲取當前用戶
-  window.getCurrentUser = () => userProfile;
-  window.isLoggedIn = () => !!currentUser;
-  window.isAdmin = () => userProfile?.is_admin || userProfile?.email === ADMIN_EMAIL || false;
+  window.getCurrentUser = () => currentUser;
+  window.getUserProfile = () => userProfile;
 
-  // 更新用戶資料
-  window.updateUserProfile = async (updates) => {
-    if (!supabase || !currentUser) return false;
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update(updates)
-        .eq('id', currentUser.id);
-      if (error) throw error;
-      userProfile = { ...userProfile, ...updates };
-      syncToReactAuth(userProfile);
-      updateUI();
-      return true;
-    } catch (err) {
-      showToast('更新失敗：' + err.message, 'error');
-      return false;
-    }
-  };
-
-  // 刪除帳號
-  window.deleteAccount = async () => {
-    if (!supabase || !currentUser) return false;
-    if (!confirm('確定要刪除帳號嗎？此操作無法復原。')) return false;
-    try {
-      // 刪除用戶資料
-      await supabase.from('users').delete().eq('id', currentUser.id);
-      // 登出
-      await supabase.auth.signOut();
-      currentUser = null;
-      userProfile = null;
-      localStorage.removeItem('user');
-      updateUI();
-      showToast('帳號已刪除', 'success');
-      setTimeout(() => window.location.href = '/', 1500);
-      return true;
-    } catch (err) {
-      showToast('刪除失敗：' + err.message, 'error');
-      return false;
-    }
-  };
-
-  // ==================== UI 更新 ====================
-  function updateUI() {
-    const container = document.getElementById('auth-container');
-    if (!container) return;
-
-    container.innerHTML = '';
-
-    if (currentUser && userProfile) {
-      // 已登入
-      const displayName = userProfile.name || userProfile.username || userProfile.email.split('@')[0];
-      // 限制顯示名稱長度，避免手機版溢出
-      const shortName = displayName.length > 8 ? displayName.substring(0, 8) + '...' : displayName;
-
-      const userBtn = document.createElement('button');
-      userBtn.onclick = () => { window.location.href = './profile.html'; };
-      userBtn.className = 'auth-btn auth-btn-user';
-      userBtn.innerHTML = `👤 ${shortName}`;
-      container.appendChild(userBtn);
-
-      const logoutBtn = document.createElement('button');
-      logoutBtn.onclick = window.logoutUser;
-      logoutBtn.className = 'auth-btn auth-btn-logout';
-      logoutBtn.innerHTML = '登出';
-      container.appendChild(logoutBtn);
-    } else {
-      // 未登入
-      const loginBtn = document.createElement('button');
-      loginBtn.onclick = () => window.showLoginModal();
-      loginBtn.className = 'auth-btn auth-btn-login';
-      loginBtn.innerHTML = '登入';
-      container.appendChild(loginBtn);
-
-      const regBtn = document.createElement('button');
-      regBtn.onclick = () => window.showRegisterModal();
-      regBtn.className = 'auth-btn auth-btn-register';
-      regBtn.innerHTML = '註冊';
-      container.appendChild(regBtn);
-    }
-
-    // 管理員按鈕
-    const adminBtn = document.getElementById('admin-panel-btn');
-    if (adminBtn) {
-      adminBtn.style.display = window.isAdmin() ? 'block' : 'none';
-    }
-  }
-
-  // ==================== 模態框 ====================
+  // ==================== 登入/註冊模態框 ====================
+  // 攔截 React 的登入按鈕，顯示 Supabase 登入對話框
   window.showLoginModal = () => {
     document.getElementById('auth-modal-overlay')?.remove();
-    const html = `
-      <div id="auth-modal-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;justify-content:center;align-items:center;z-index:99999;">
-        <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);padding:40px;border-radius:12px;width:90%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-          <h2 style="color:#d4af37;margin:0 0 24px;font-size:22px;font-weight:600;">登入</h2>
-          <input type="email" id="auth-email" placeholder="電子郵件" autocomplete="email"
-            style="width:100%;padding:12px;margin:0 0 12px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <input type="password" id="auth-password" placeholder="密碼" autocomplete="current-password"
-            style="width:100%;padding:12px;margin:0 0 8px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <div id="auth-error" style="color:#ff6b6b;font-size:13px;min-height:20px;margin-bottom:12px;"></div>
-          <button id="auth-login-btn" onclick="window._doLogin()"
-            style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:6px;cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;">
-            登入
-          </button>
-          <button onclick="document.getElementById('auth-modal-overlay').remove();window.showRegisterModal();"
-            style="width:100%;padding:10px;background:transparent;color:#888;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
-            還沒有帳號？立即註冊
-          </button>
-          <button onclick="document.getElementById('auth-modal-overlay').remove()"
-            style="width:100%;padding:10px;background:transparent;color:#666;border:none;cursor:pointer;font-size:13px;">
-            取消
-          </button>
+    const overlay = document.createElement('div');
+    overlay.id = 'auth-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:32px;width:100%;max-width:400px;position:relative;">
+        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">✕</button>
+        <h2 style="color:#d4af37;font-size:20px;margin-bottom:24px;text-align:center;">登入</h2>
+        <div id="auth-error" style="display:none;background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);color:#f44336;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;"></div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">電子信箱</label>
+          <input id="auth-email" type="email" placeholder="your@email.com" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
         </div>
+        <div style="margin-bottom:24px;">
+          <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">密碼</label>
+          <input id="auth-password" type="password" placeholder="••••••••" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
+        </div>
+        <button onclick="doLogin()" style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:12px;">登入</button>
+        <p style="text-align:center;color:#888;font-size:13px;">還沒有帳號？<a href="#" onclick="window.showRegisterModal();return false;" style="color:#d4af37;text-decoration:none;">立即註冊</a></p>
       </div>
     `;
-    document.body.insertAdjacentHTML('beforeend', html);
-    document.getElementById('auth-email')?.focus();
-    document.getElementById('auth-password')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter') window._doLogin();
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    setTimeout(() => document.getElementById('auth-email')?.focus(), 100);
+
+    window.doLogin = async () => {
+      const email = document.getElementById('auth-email')?.value?.trim();
+      const password = document.getElementById('auth-password')?.value;
+      const errEl = document.getElementById('auth-error');
+      if (!email || !password) { errEl.textContent = '請填寫信箱和密碼'; errEl.style.display = 'block'; return; }
+      errEl.style.display = 'none';
+      const ok = await window.loginUser(email, password);
+      if (ok) document.getElementById('auth-modal-overlay')?.remove();
+      else { errEl.textContent = '登入失敗，請檢查信箱和密碼'; errEl.style.display = 'block'; }
+    };
+
+    // Enter 鍵提交
+    overlay.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') window.doLogin(); });
     });
-  };
-
-  window._doLogin = async () => {
-    const email = document.getElementById('auth-email')?.value?.trim();
-    const password = document.getElementById('auth-password')?.value;
-    const errEl = document.getElementById('auth-error');
-    const btn = document.getElementById('auth-login-btn');
-
-    if (!email || !password) {
-      if (errEl) errEl.textContent = '請填寫電子郵件和密碼';
-      return;
-    }
-    if (btn) { btn.disabled = true; btn.textContent = '登入中...'; }
-    if (errEl) errEl.textContent = '';
-
-    const ok = await window.loginUser(email, password);
-    if (ok) {
-      document.getElementById('auth-modal-overlay')?.remove();
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = '登入'; }
-      if (errEl) errEl.textContent = '信箱或密碼錯誤，請重新輸入';
-    }
   };
 
   window.showRegisterModal = () => {
     document.getElementById('auth-modal-overlay')?.remove();
-    const html = `
-      <div id="auth-modal-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);display:flex;justify-content:center;align-items:center;z-index:99999;">
-        <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);padding:40px;border-radius:12px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-          <h2 style="color:#d4af37;margin:0 0 24px;font-size:22px;font-weight:600;">註冊帳號</h2>
-          <input type="email" id="reg-email" placeholder="電子郵件" autocomplete="email"
-            style="width:100%;padding:12px;margin:0 0 12px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <input type="text" id="reg-username" placeholder="帳號名稱（不可重複）" autocomplete="username"
-            style="width:100%;padding:12px;margin:0 0 12px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <input type="text" id="reg-realname" placeholder="顯示名稱"
-            style="width:100%;padding:12px;margin:0 0 12px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <input type="password" id="reg-password" placeholder="密碼（至少 8 個字符）" autocomplete="new-password"
-            style="width:100%;padding:12px;margin:0 0 8px;background:#2a2a2a;border:1px solid #444;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;outline:none;">
-          <div id="reg-error" style="color:#ff6b6b;font-size:13px;min-height:20px;margin-bottom:12px;"></div>
-          <button id="reg-submit-btn" onclick="window._doRegister()"
-            style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:6px;cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;">
-            註冊
-          </button>
-          <button onclick="document.getElementById('auth-modal-overlay').remove();window.showLoginModal();"
-            style="width:100%;padding:10px;background:transparent;color:#888;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px;margin-bottom:10px;">
-            已有帳號？立即登入
-          </button>
-          <button onclick="document.getElementById('auth-modal-overlay').remove()"
-            style="width:100%;padding:10px;background:transparent;color:#666;border:none;cursor:pointer;font-size:13px;">
-            取消
-          </button>
+    const overlay = document.createElement('div');
+    overlay.id = 'auth-modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    overlay.innerHTML = `
+      <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:32px;width:100%;max-width:400px;position:relative;">
+        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">✕</button>
+        <h2 style="color:#d4af37;font-size:20px;margin-bottom:24px;text-align:center;">註冊</h2>
+        <div id="reg-error" style="display:none;background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);color:#f44336;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;"></div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">用戶名稱</label>
+          <input id="reg-username" type="text" placeholder="您的名稱" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
         </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">電子信箱</label>
+          <input id="reg-email" type="email" placeholder="your@email.com" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
+        </div>
+        <div style="margin-bottom:24px;">
+          <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">密碼（至少 6 位）</label>
+          <input id="reg-password" type="password" placeholder="••••••••" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
+        </div>
+        <button onclick="doRegister()" style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:12px;">註冊</button>
+        <p style="text-align:center;color:#888;font-size:13px;">已有帳號？<a href="#" onclick="window.showLoginModal();return false;" style="color:#d4af37;text-decoration:none;">立即登入</a></p>
       </div>
     `;
-    document.body.insertAdjacentHTML('beforeend', html);
-    document.getElementById('reg-email')?.focus();
-  };
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
-  window._doRegister = async () => {
-    const email = document.getElementById('reg-email')?.value?.trim();
-    const username = document.getElementById('reg-username')?.value?.trim();
-    const realName = document.getElementById('reg-realname')?.value?.trim();
-    const password = document.getElementById('reg-password')?.value;
-    const errEl = document.getElementById('reg-error');
-    const btn = document.getElementById('reg-submit-btn');
-
-    if (!email || !username || !password) {
-      if (errEl) errEl.textContent = '請填寫所有必填欄位';
-      return;
-    }
-    if (password.length < 8) {
-      if (errEl) errEl.textContent = '密碼至少需要 8 個字符';
-      return;
-    }
-    if (btn) { btn.disabled = true; btn.textContent = '註冊中...'; }
-    if (errEl) errEl.textContent = '';
-
-    const ok = await window.registerUser(email, password, username, realName);
-    if (ok) {
-      document.getElementById('auth-modal-overlay')?.remove();
-    } else {
-      if (btn) { btn.disabled = false; btn.textContent = '註冊'; }
-    }
+    window.doRegister = async () => {
+      const username = document.getElementById('reg-username')?.value?.trim();
+      const email = document.getElementById('reg-email')?.value?.trim();
+      const password = document.getElementById('reg-password')?.value;
+      const errEl = document.getElementById('reg-error');
+      if (!username || !email || !password) { errEl.textContent = '請填寫完整資訊'; errEl.style.display = 'block'; return; }
+      if (password.length < 6) { errEl.textContent = '密碼至少需要 6 位'; errEl.style.display = 'block'; return; }
+      errEl.style.display = 'none';
+      const ok = await window.registerUser(email, password, username);
+      if (ok) document.getElementById('auth-modal-overlay')?.remove();
+      else { errEl.textContent = '註冊失敗，請稍後再試'; errEl.style.display = 'block'; }
+    };
   };
 
   // ==================== Toast 通知 ====================
-  function showToast(message, type = 'info') {
+  function showToast(msg, type) {
     const existing = document.getElementById('auth-toast');
     if (existing) existing.remove();
-
-    const colors = {
-      success: { bg: '#1a3a1a', border: '#4caf50', text: '#4caf50' },
-      error: { bg: '#3a1a1a', border: '#f44336', text: '#f44336' },
-      info: { bg: '#1a2a3a', border: '#2196f3', text: '#2196f3' }
-    };
-    const c = colors[type] || colors.info;
-
     const toast = document.createElement('div');
     toast.id = 'auth-toast';
-    toast.style.cssText = `
-      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
-      background: ${c.bg}; border: 1px solid ${c.border}; color: ${c.text};
-      padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500;
-      z-index: 999999; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      animation: slideUp 0.3s ease;
-      max-width: 90vw; text-align: center;
-    `;
-    toast.textContent = message;
+    const colors = { success: { bg: '#1a3a1a', border: '#4caf50', text: '#4caf50' }, error: { bg: '#3a1a1a', border: '#f44336', text: '#f44336' } };
+    const c = colors[type] || { bg: '#1a2a3a', border: '#2196f3', text: '#2196f3' };
+    toast.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:99998;background:${c.bg};border:1px solid ${c.border};color:${c.text};white-space:nowrap;`;
+    toast.textContent = msg;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
   }
 
-  // ==================== 互動系統（按讚/收藏）====================
-  window.toggleContentLike = async (contentType, contentId) => {
-    if (!supabase || !currentUser) {
-      window.showLoginModal();
-      return false;
-    }
-    try {
-      const { data: existing } = await supabase
-        .from('content_likes')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .eq('content_type', contentType)
-        .eq('content_id', contentId)
-        .single();
+  // ==================== 攔截 React Navbar 的登入/登出按鈕 ====================
+  // React Navbar 有自己的登入按鈕，點擊後會呼叫 onLoginClick prop
+  // 我們需要攔截這個按鈕，讓它顯示我們的 Supabase 登入對話框
+  function interceptNavbarButtons() {
+    function tryIntercept() {
+      const navbar = document.querySelector('header[role="banner"]');
+      if (!navbar) return false;
 
-      if (existing) {
-        await supabase.from('content_likes').delete()
-          .eq('user_id', currentUser.id)
-          .eq('content_type', contentType)
-          .eq('content_id', contentId);
-        return false; // unliked
-      } else {
-        await supabase.from('content_likes').insert({
-          user_id: currentUser.id,
-          content_type: contentType,
-          content_id: contentId
-        });
-        return true; // liked
-      }
-    } catch (err) {
-      console.warn('[Auth] 按讚失敗:', err);
-      return null;
-    }
-  };
-
-  window.toggleContentBookmark = async (contentType, contentId) => {
-    if (!supabase || !currentUser) {
-      window.showLoginModal();
-      return false;
-    }
-    try {
-      const { data: existing } = await supabase
-        .from('content_bookmarks')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .eq('content_type', contentType)
-        .eq('content_id', contentId)
-        .single();
-
-      if (existing) {
-        await supabase.from('content_bookmarks').delete()
-          .eq('user_id', currentUser.id)
-          .eq('content_type', contentType)
-          .eq('content_id', contentId);
-        return false;
-      } else {
-        await supabase.from('content_bookmarks').insert({
-          user_id: currentUser.id,
-          content_type: contentType,
-          content_id: contentId
-        });
-        return true;
-      }
-    } catch (err) {
-      console.warn('[Auth] 收藏失敗:', err);
-      return null;
-    }
-  };
-
-  window.checkContentLike = async (contentType, contentId) => {
-    if (!supabase || !currentUser) return false;
-    const { data } = await supabase
-      .from('content_likes')
-      .select('id')
-      .eq('user_id', currentUser.id)
-      .eq('content_type', contentType)
-      .eq('content_id', contentId)
-      .single();
-    return !!data;
-  };
-
-  window.checkContentBookmark = async (contentType, contentId) => {
-    if (!supabase || !currentUser) return false;
-    const { data } = await supabase
-      .from('content_bookmarks')
-      .select('id')
-      .eq('user_id', currentUser.id)
-      .eq('content_type', contentType)
-      .eq('content_id', contentId)
-      .single();
-    return !!data;
-  };
-
-  // 提交意見回報
-  window.submitReport = async (type, content, contactEmail) => {
-    if (!supabase) return false;
-    try {
-      const { error } = await supabase.from('reports').insert({
-        user_id: currentUser?.id || null,
-        type: type,
-        content: content,
-        contact_email: contactEmail || currentUser?.email || null,
-        status: 'pending'
+      // 攔截「登入」按鈕
+      navbar.querySelectorAll('button').forEach(btn => {
+        const txt = (btn.textContent || '').trim();
+        if (txt === '登入' && !btn.dataset.intercepted) {
+          btn.dataset.intercepted = '1';
+          btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.showLoginModal();
+          }, true);
+        }
+        // 攔截「管理員」按鈕 → 跳轉到 admin/index.html
+        if ((txt === '管理員' || txt.includes('管理員')) && !btn.dataset.intercepted) {
+          btn.dataset.intercepted = '1';
+          btn.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.location.href = './admin/index.html';
+          }, true);
+        }
       });
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.error('[Auth] 提交回報失敗:', err);
-      return false;
-    }
-  };
 
-  // 提交投稿
-  window.submitContribution = async (data) => {
-    if (!supabase || !currentUser) {
-      window.showLoginModal();
-      return false;
-    }
-    try {
-      const { error } = await supabase.from('submissions').insert({
-        user_id: currentUser.id,
-        ...data,
-        status: 'pending'
+      // 攔截「個人資料」連結 → 跳轉到 profile.html
+      navbar.querySelectorAll('a').forEach(a => {
+        const href = a.getAttribute('href') || '';
+        const txt = (a.textContent || '').trim();
+        if ((href.includes('/profile') || txt === '個人資料') && !a.dataset.intercepted) {
+          a.dataset.intercepted = '1';
+          a.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.location.href = './profile.html';
+          }, true);
+        }
+        // 攔截「管理員」連結
+        if (href.includes('/admin') && !a.dataset.intercepted) {
+          a.dataset.intercepted = '1';
+          a.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.location.href = './admin/index.html';
+          }, true);
+        }
       });
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.error('[Auth] 提交投稿失敗:', err);
-      return false;
-    }
-  };
 
-  // 獲取 Supabase 客戶端（供其他腳本使用）
-  window.getSupabaseClient = () => supabase;
+      // 攔截「登出」選單項目
+      document.querySelectorAll('[role="menuitem"]').forEach(item => {
+        const txt = (item.textContent || '').trim();
+        if ((txt === '登出' || txt === 'Logout') && !item.dataset.intercepted) {
+          item.dataset.intercepted = '1';
+          item.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            window.logoutUser();
+          }, true);
+        }
+      });
+
+      return true;
+    }
+
+    // 持續監控 DOM 變化，確保攔截所有新渲染的按鈕
+    const obs = new MutationObserver(() => setTimeout(tryIntercept, 100));
+    function start() {
+      obs.observe(document.body, { childList: true, subtree: true });
+      [200, 500, 1000, 2000].forEach(t => setTimeout(tryIntercept, t));
+    }
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
+  }
 
   // ==================== 啟動 ====================
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-      to { opacity: 1; transform: translateX(-50%) translateY(0); }
-    }
-  `;
-  document.head.appendChild(style);
-
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(init, 500));
+    document.addEventListener('DOMContentLoaded', () => { init(); interceptNavbarButtons(); });
   } else {
-    setTimeout(init, 500);
-  }
-})();
-
-/**
- * ==================== 動態資料橋接層 v1.0 ====================
- * 讓前台 React 應用能讀取 Supabase 中管理員新增的內容
- * 透過覆蓋 React 的資料讀取邏輯，注入 Supabase 資料
- */
-(function dynamicDataBridge() {
-  'use strict';
-
-  // 等待 Supabase 客戶端就緒
-  function waitForSupabase(cb) {
-    let n = 0;
-    const t = setInterval(() => {
-      n++;
-      if (window.supabaseClient) { clearInterval(t); cb(window.supabaseClient); }
-      else if (n > 100) clearInterval(t);
-    }, 100);
+    init();
+    interceptNavbarButtons();
   }
 
-  // 將 Supabase 資料注入到全域，供 React 讀取
-  async function injectSupabaseData(sb) {
-    try {
-      // 讀取所有哲學家（含地區和時代資訊）
-      const { data: philosophers } = await sb
-        .from('philosophers')
-        .select(`
-          id, name, name_en, birth_year, death_year, bio, avatar, era_id,
-          eras(id, name, region_id, regions(id, name))
-        `)
-        .order('birth_year', { ascending: true });
-
-      // 讀取所有理論
-      const { data: theories } = await sb
-        .from('theories')
-        .select(`
-          id, name, name_en, description, philosopher_id,
-          philosophers(id, name)
-        `)
-        .order('created_at', { ascending: true });
-
-      // 讀取所有論證
-      const { data: arguments_ } = await sb
-        .from('arguments')
-        .select(`
-          id, title, content, philosopher_id, theory_id, question_id,
-          philosophers(id, name),
-          theories(id, name)
-        `)
-        .order('created_at', { ascending: true });
-
-      // 讀取所有問題
-      const { data: questions } = await sb
-        .from('questions')
-        .select('id, title, description, category')
-        .order('created_at', { ascending: true });
-
-      // 讀取所有地區
-      const { data: regions } = await sb
-        .from('regions')
-        .select('id, name, description')
-        .order('name');
-
-      // 讀取所有時代
-      const { data: eras } = await sb
-        .from('eras')
-        .select('id, name, start_year, end_year, region_id, regions(name)')
-        .order('start_year', { ascending: true });
-
-      // 將資料存入全域，供 React 和其他腳本使用
-      window.__supabaseData = {
-        philosophers: philosophers || [],
-        theories: theories || [],
-        arguments: arguments_ || [],
-        questions: questions || [],
-        regions: regions || [],
-        eras: eras || [],
-        loadedAt: new Date().toISOString()
-      };
-
-      // 觸發自訂事件，通知 React 資料已就緒
-      window.dispatchEvent(new CustomEvent('supabaseDataLoaded', {
-        detail: window.__supabaseData
-      }));
-
-      // 嘗試注入到 React 的 localStorage（讓 React 能讀取）
-      injectToReactStorage(window.__supabaseData);
-
-    } catch (err) {
-      console.warn('[DataBridge] 載入資料失敗:', err);
-    }
-  }
-
-  function injectToReactStorage(data) {
-    try {
-      // 將哲學家資料格式化為 React 期望的格式
-      if (data.philosophers && data.philosophers.length > 0) {
-        const reactPhilosophers = data.philosophers.map(p => ({
-          id: p.id,
-          name: p.name,
-          nameEn: p.name_en || '',
-          birthYear: p.birth_year,
-          deathYear: p.death_year,
-          bio: p.bio || '',
-          avatar: p.avatar || '',
-          era: p.eras?.name || '',
-          region: p.eras?.regions?.name || '',
-          eraId: p.era_id
-        }));
-        localStorage.setItem('supabase_philosophers', JSON.stringify(reactPhilosophers));
-      }
-
-      // 將理論資料格式化
-      if (data.theories && data.theories.length > 0) {
-        const reactTheories = data.theories.map(t => ({
-          id: t.id,
-          name: t.name,
-          nameEn: t.name_en || '',
-          description: t.description || '',
-          philosopherId: t.philosopher_id,
-          philosopherName: t.philosophers?.name || ''
-        }));
-        localStorage.setItem('supabase_theories', JSON.stringify(reactTheories));
-      }
-
-      // 將論證資料格式化
-      if (data.arguments && data.arguments.length > 0) {
-        const reactArguments = data.arguments.map(a => ({
-          id: a.id,
-          title: a.title,
-          content: a.content || '',
-          philosopherId: a.philosopher_id,
-          theoryId: a.theory_id,
-          questionId: a.question_id,
-          philosopherName: a.philosophers?.name || '',
-          theoryName: a.theories?.name || ''
-        }));
-        localStorage.setItem('supabase_arguments', JSON.stringify(reactArguments));
-      }
-
-      // 觸發 storage 事件讓 React 重新讀取
-      window.dispatchEvent(new Event('storage'));
-    } catch (err) {
-      console.warn('[DataBridge] 注入 localStorage 失敗:', err);
-    }
-  }
-
-  // 提供全域 API 供外部調用
-  window.refreshSupabaseData = () => {
-    waitForSupabase(injectSupabaseData);
-  };
-
-  // 頁面載入時自動執行
-  waitForSupabase(sb => {
-    // 延遲 1 秒確保 React 已渲染
-    setTimeout(() => injectSupabaseData(sb), 1000);
-    // 每 5 分鐘自動刷新一次
-    setInterval(() => injectSupabaseData(sb), 5 * 60 * 1000);
-  });
 })();
