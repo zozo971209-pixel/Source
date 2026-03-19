@@ -172,12 +172,20 @@
       const SUPABASE_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
       const SUPABASE_ANON_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
       const CACHE_KEY = 'sb_data_cache';
+      const CACHE_VERSION = '20260319-3'; // 更新版本號強制清除舊快取
       const CACHE_TTL = 5 * 60 * 1000; // 5分鐘快取
 
-      // 檢查快取
+      // 清除舊版本快取
       try {
         const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
-        if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
+        if (cached && cached.version !== CACHE_VERSION) {
+          localStorage.removeItem(CACHE_KEY);
+          // 同時清除舊的 philosophy_* 資料，讓 React 重新從 Supabase 讀取
+          localStorage.removeItem('philosophy_regions');
+          localStorage.removeItem('philosophy_eras');
+          localStorage.removeItem('philosophy_philosophers');
+          localStorage.removeItem('philosophy_questions');
+        } else if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
           applyData(cached);
           loadReact();
           return;
@@ -200,7 +208,7 @@
         const [regions, eras, philosophers, questions] = await Promise.all([
           regRes.json(), eraRes.json(), philRes.json(), qRes.json()
         ]);
-        const data = { ts: Date.now(), regions, eras, philosophers, questions };
+        const data = { ts: Date.now(), version: CACHE_VERSION, regions, eras, philosophers, questions };
         localStorage.setItem(CACHE_KEY, JSON.stringify(data));
         applyData(data);
       } catch(err) {
@@ -280,11 +288,11 @@
         const s = document.createElement('script');
         s.type = 'module';
         s.crossOrigin = '';
-        s.src = './assets/index-0IGz-JVJ.js?v=20260319-2';
+        s.src = './assets/index-0IGz-JVJ.js?v=20260319-3';
         document.head.appendChild(s);
         // 載入 auth-supabase.js
         const a = document.createElement('script');
-        a.src = './assets/auth-supabase.js?v=20260319-2';
+        a.src = './assets/auth-supabase.js?v=20260319-3';
         document.head.appendChild(a);
       }
     })();
