@@ -153,19 +153,37 @@
 
   // ==================== 攔截 React 認證操作 ====================
   function interceptReactLoginLogout() {
-    // 攔截 localStorage.setItem，同步 React 的登入到 Supabase
+    // 攔截 localStorage.setItem，同步按讚/收藏狀態
     const origSetItem = localStorage.setItem.bind(localStorage);
+    let _syncingLikes = false;
     localStorage.setItem = function(key, value) {
       origSetItem(key, value);
-      if (key === 'user') {
-        try {
-          const userData = JSON.parse(value);
-          if (userData && userData.email && !currentUser) {
-            // React 設置了用戶，嘗試同步到 Supabase
-            // 這裡不做任何操作，因為 Supabase 的 onAuthStateChange 會處理
-          }
-        } catch(e) {}
-      }
+      if (_syncingLikes) return;
+      _syncingLikes = true;
+      try {
+        // 同步 likes ↔ likedTheories
+        if (key === 'likes') {
+          const ids = JSON.parse(value) || [];
+          origSetItem('likedTheories', JSON.stringify(ids));
+          // 更新 philosophy_philosophers 中 theory 的 likes 計數
+          updateTheoryLikeCounts(ids, null);
+        } else if (key === 'likedTheories') {
+          const ids = JSON.parse(value) || [];
+          origSetItem('likes', JSON.stringify(ids));
+          updateTheoryLikeCounts(ids, null);
+        }
+        // 同步 bookmarks ↔ bookmarkedTheories
+        if (key === 'bookmarks') {
+          const ids = JSON.parse(value) || [];
+          origSetItem('bookmarkedTheories', JSON.stringify(ids));
+          updateTheoryLikeCounts(null, ids);
+        } else if (key === 'bookmarkedTheories') {
+          const ids = JSON.parse(value) || [];
+          origSetItem('bookmarks', JSON.stringify(ids));
+          updateTheoryLikeCounts(null, ids);
+        }
+      } catch(e) {}
+      _syncingLikes = false;
     };
 
     // 攔截 localStorage.removeItem，同步 React 的登出到 Supabase
@@ -173,12 +191,149 @@
     localStorage.removeItem = function(key) {
       origRemoveItem(key);
       if (key === 'user' && currentUser && supabase) {
-        // React 登出了，同步到 Supabase
         supabase.auth.signOut().catch(() => {});
         currentUser = null;
         userProfile = null;
       }
     };
+  }
+
+  // ==================== 更新 theory 的 likes/bookmarks 計數 ====================
+  function updateTheoryLikeCounts(likedIds, bookmarkedIds) {
+    try {
+      const philKey = 'philosophy_philosophers';
+      const philData = localStorage.getItem(philKey);
+      if (!philData) return;
+      const philosophers = JSON.parse(philData);
+      let changed = false;
+      philosophers.forEach(phil => {
+        if (!phil.theories) return;
+        phil.theories.forEach(theory => {
+          if (likedIds !== null) {
+            const newLikes = likedIds.includes(theory.id) ? 1 : 0;
+            if (theory.likes !== newLikes) { theory.likes = newLikes; changed = true; }
+          }
+          if (bookmarkedIds !== null) {
+            const newBookmarks = bookmarkedIds.includes(theory.id) ? 1 : 0;
+            if (theory.bookmarks !== newBookmarks) { theory.bookmarks = newBookmarks; changed = true; }
+          }
+        });
+      });
+      if (changed) {
+        const orig = localStorage.setItem.bind(localStorage);
+        orig(philKey, JSON.stringify(philosophers));
+      }
+    } catch(e) {}
+  }
+
+  // ==================== 從 Supabase 同步後台內容到前台 ====================
+  async function syncSupabaseDataToReact() {
+    if (!supabase) return;
+    try {
+      // 1. 同步 regions
+      const { data: regions } = await supabase.from('regions').select('*').order('created_at');
+      if (regions && regions.length > 0) {
+        // 讀取現有的 React regions 資料（保留原有格式）
+        const existingRegions = JSON.parse(localStorage.getItem('philosophy_regions') || 'null');
+        const baseRegions = existingRegions || [
+          {id:'western',name:'西方哲學',nameEn:'Western Philosophy',description:'從古希臘的理性之光到當代的語言轉向，探索西方思想的演變歷程。'},
+          {id:'eastern',name:'東方哲學',nameEn:'Eastern Philosophy',description:'儒釋道三家並立，探索中國哲學的深邃智慧與人生境界。'},
+          {id:'indian',name:'印度哲學',nameEn:'Indian Philosophy',description:'梵我合一的終極追求，六派正統哲學與佛教思想的深奧體系。'},
+          {id:'islamic',name:'伊斯蘭哲學',nameEn:'Islamic Philosophy',description:'理性與啟示的交匯，阿拉伯哲學的黃金時代與獨特傳統。'}
+        ];
+        // 加入 Supabase 中有但 React 中沒有的地區
+        const existingNames = baseRegions.map(r => r.name);
+        regions.forEach(r => {
+          if (!existingNames.includes(r.name)) {
+            baseRegions.push({
+              id: r.id,
+              name: r.name,
+              nameEn: r.name,
+              description: r.description || ''
+            });
+          }
+        });
+        localStorage.setItem('philosophy_regions', JSON.stringify(baseRegions));
+      }
+
+      // 2. 同步 eras（時代）
+      const { data: eras } = await supabase.from('eras').select('*, regions(name)').order('created_at');
+      if (eras && eras.length > 0) {
+        const existingEras = JSON.parse(localStorage.getItem('philosophy_eras') || 'null');
+        const baseEras = existingEras || [];
+        const existingNames = baseEras.map(e => e.title);
+        eras.forEach(era => {
+          if (!existingNames.includes(era.name)) {
+            baseEras.push({
+              id: era.id,
+              period: era.period || '',
+              title: era.name,
+              titleEn: era.name,
+              description: era.description || '',
+              features: era.features || [],
+              philosopherCount: era.philosopher_count || 0,
+              region: era.region_id,
+              regionName: era.regions?.name || ''
+            });
+          }
+        });
+        localStorage.setItem('philosophy_eras', JSON.stringify(baseEras));
+      }
+
+      // 3. 同步 philosophers
+      const { data: philosophers } = await supabase.from('philosophers').select('*, eras(name, region_id), regions(name)').order('created_at');
+      if (philosophers && philosophers.length > 0) {
+        const existingPhils = JSON.parse(localStorage.getItem('philosophy_philosophers') || 'null');
+        const basePhils = existingPhils || [];
+        const existingNames = basePhils.map(p => p.name);
+        philosophers.forEach(phil => {
+          if (!existingNames.includes(phil.name)) {
+            basePhils.push({
+              id: phil.id,
+              name: phil.name,
+              nameEn: phil.name,
+              birthYear: phil.birth_year || '',
+              deathYear: phil.death_year || '',
+              birthplace: '',
+              era: phil.era_id,
+              eraName: phil.eras?.name || '',
+              region: phil.region_id,
+              regionName: phil.regions?.name || '',
+              biography: phil.biography || '',
+              theories: [],
+              works: phil.works || []
+            });
+          }
+        });
+        localStorage.setItem('philosophy_philosophers', JSON.stringify(basePhils));
+      }
+
+      // 4. 同步 questions（哲學問題）
+      const { data: questions } = await supabase.from('questions').select('*').order('created_at');
+      if (questions && questions.length > 0) {
+        const existingQs = JSON.parse(localStorage.getItem('philosophy_questions') || 'null');
+        const baseQs = existingQs || [];
+        const existingTitles = baseQs.map(q => q.title);
+        questions.forEach(q => {
+          if (!existingTitles.includes(q.title)) {
+            baseQs.push({
+              id: q.id,
+              title: q.title,
+              description: q.description || '',
+              category: q.category || '',
+              difficulty: q.difficulty || 'medium',
+              philosophers: [],
+              arguments: []
+            });
+          }
+        });
+        localStorage.setItem('philosophy_questions', JSON.stringify(baseQs));
+      }
+
+      console.log('[DataSync] Supabase 資料已同步到 React localStorage');
+    } catch(err) {
+      console.warn('[DataSync] 同步失敗:', err);
+    }
   }
 
   // ==================== 公開 API ====================
@@ -439,12 +594,48 @@
     else document.addEventListener('DOMContentLoaded', start);
   }
 
+  // ==================== 初始化按讚/收藏同步 ====================
+  function initLikesSync() {
+    // 確保 likes 和 likedTheories 初始狀態一致
+    try {
+      const likes = JSON.parse(localStorage.getItem('likes') || '[]');
+      const likedTheories = JSON.parse(localStorage.getItem('likedTheories') || '[]');
+      const bookmarks = JSON.parse(localStorage.getItem('bookmarks') || '[]');
+      const bookmarkedTheories = JSON.parse(localStorage.getItem('bookmarkedTheories') || '[]');
+      // 合併兩個陣列（取聯集）
+      const mergedLikes = [...new Set([...likes, ...likedTheories])];
+      const mergedBookmarks = [...new Set([...bookmarks, ...bookmarkedTheories])];
+      const orig = localStorage.setItem.bind(localStorage);
+      orig('likes', JSON.stringify(mergedLikes));
+      orig('likedTheories', JSON.stringify(mergedLikes));
+      orig('bookmarks', JSON.stringify(mergedBookmarks));
+      orig('bookmarkedTheories', JSON.stringify(mergedBookmarks));
+      // 更新 theory 的 likes/bookmarks 計數
+      updateTheoryLikeCounts(mergedLikes, mergedBookmarks);
+    } catch(e) {}
+  }
+
   // ==================== 啟動 ====================
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { init(); interceptNavbarButtons(); });
+    document.addEventListener('DOMContentLoaded', () => {
+      init();
+      interceptNavbarButtons();
+      initLikesSync();
+      // 頁面載入後從 Supabase 同步資料
+      setTimeout(async () => {
+        await waitForSDK();
+        if (supabase) await syncSupabaseDataToReact();
+      }, 1000);
+    });
   } else {
     init();
     interceptNavbarButtons();
+    initLikesSync();
+    // 頁面載入後從 Supabase 同步資料
+    setTimeout(async () => {
+      await waitForSDK();
+      if (supabase) await syncSupabaseDataToReact();
+    }, 1000);
   }
 
 })();
