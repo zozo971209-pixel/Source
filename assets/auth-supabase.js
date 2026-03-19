@@ -1,11 +1,12 @@
 /**
- * Supabase 認證橋接系統 v5.0
+ * Supabase 認證橋接系統 v6.0
  *
  * 修復項目：
- * 1. 論證詳情頁 baseCount:128/56 硬編碼問題 → 用 DOM 覆蓋
- * 2. 按讚/收藏三個系統不同步 → 統一用 localStorage.likes 作為唯一來源
- * 3. 首頁熱門理論顯示 0 → 監聽 likes 變化，更新 DOM
- * 4. 後台內容同步前台 → 在 index.html 預載入（已處理）
+ * 1. 按讚/收藏同步到 Supabase content_likes/content_bookmarks 表格
+ * 2. 個人頁面白畫面（加入載入動畫）
+ * 3. 後台新增地區同步到前台（MutationObserver DOM 注入）
+ * 4. baseCount:128 硬編碼問題（DOM 覆蓋）
+ * 5. localStorage 兩個系統（likes/likedTheories）雙向同步
  */
 (function () {
   'use strict';
@@ -136,9 +137,10 @@
   }
 
   // ==================== 攔截 React 的 localStorage 操作 ====================
-  // 關鍵：Jg（LikeButton）用 likes/bookmarks（Set）
+  // 關鍵：Jg（LikeButton）用 likes/bookmarks（Set 序列化為 Array）
   //       Wk（LikesContext）用 likedTheories/bookmarkedTheories（Array）
   //       兩個系統互不監聽，需要雙向同步
+  //       同時需要同步到 Supabase content_likes/content_bookmarks 表格
   function interceptReactLoginLogout() {
     const origSetItem = localStorage.setItem.bind(localStorage);
     const origRemoveItem = localStorage.removeItem.bind(localStorage);
@@ -153,21 +155,39 @@
         if (key === 'likes') {
           const ids = JSON.parse(value) || [];
           origSetItem('likedTheories', JSON.stringify(ids));
+          // 同步到 Supabase（非同步，不阻塞）
+          if (currentUser && supabase) {
+            syncLikesToSupabase(ids).catch(() => {});
+          }
+          // 更新 philosophy_philosophers 中的 theory.likes 計數
+          updateTheoryLikeCounts(ids, origSetItem);
         }
         // Wk 更新 likedTheories → 同步到 likes（供 Jg 讀取）
         else if (key === 'likedTheories') {
           const ids = JSON.parse(value) || [];
           origSetItem('likes', JSON.stringify(ids));
+          // 同步到 Supabase（非同步，不阻塞）
+          if (currentUser && supabase) {
+            syncLikesToSupabase(ids).catch(() => {});
+          }
+          // 更新 philosophy_philosophers 中的 theory.likes 計數
+          updateTheoryLikeCounts(ids, origSetItem);
         }
         // Jg 更新 bookmarks → 同步到 bookmarkedTheories
         if (key === 'bookmarks') {
           const ids = JSON.parse(value) || [];
           origSetItem('bookmarkedTheories', JSON.stringify(ids));
+          if (currentUser && supabase) {
+            syncBookmarksToSupabase(ids).catch(() => {});
+          }
         }
         // Wk 更新 bookmarkedTheories → 同步到 bookmarks
         else if (key === 'bookmarkedTheories') {
           const ids = JSON.parse(value) || [];
           origSetItem('bookmarks', JSON.stringify(ids));
+          if (currentUser && supabase) {
+            syncBookmarksToSupabase(ids).catch(() => {});
+          }
         }
       } catch (e) {}
       _syncing = false;
@@ -183,22 +203,177 @@
     };
   }
 
+  // ==================== 更新 theory.likes 計數 ====================
+  // 當用戶按讚時，更新 localStorage.philosophy_philosophers 中的 theory.likes
+  // 這樣首頁熱門理論在重新載入時會顯示正確數字
+  function updateTheoryLikeCounts(likedIds, origSetItem) {
+    try {
+      const philosophers = JSON.parse(localStorage.getItem('philosophy_philosophers') || '[]');
+      let changed = false;
+      for (const phil of philosophers) {
+        if (!phil.theories) continue;
+        for (const theory of phil.theories) {
+          const isLiked = likedIds.includes(theory.id);
+          const expectedLikes = isLiked ? 1 : 0;
+          if (theory.likes !== expectedLikes) {
+            theory.likes = expectedLikes;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        origSetItem('philosophy_philosophers', JSON.stringify(philosophers));
+      }
+    } catch (e) {}
+  }
+
+  // ==================== 同步按讚到 Supabase ====================
+  let _likeSyncTimer = null;
+  let _lastLikeIds = null;
+
+  async function syncLikesToSupabase(ids) {
+    if (!currentUser || !supabase) return;
+    const idsStr = JSON.stringify(ids.slice().sort());
+    if (idsStr === _lastLikeIds) return;
+    _lastLikeIds = idsStr;
+
+    clearTimeout(_likeSyncTimer);
+    _likeSyncTimer = setTimeout(async () => {
+      try {
+        // 讀取現有的按讚記錄（用 content_title 儲存原始字串 ID）
+        const { data: existing } = await supabase
+          .from('content_likes')
+          .select('id,content_id,content_title')
+          .eq('user_id', currentUser.id);
+
+        // 用 content_title 作為原始 ID（如果有），否則用 content_id
+        const existingMap = {}; // originalId -> row.id
+        (existing || []).forEach(r => {
+          const origId = r.content_title || r.content_id;
+          existingMap[origId] = r.id;
+        });
+        const existingOrigIds = Object.keys(existingMap);
+
+        const toAdd = ids.filter(id => !existingOrigIds.includes(id));
+        const toRemoveIds = existingOrigIds
+          .filter(origId => !ids.includes(origId))
+          .map(origId => existingMap[origId]); // row.id
+
+        if (toAdd.length > 0) {
+          const rows = toAdd.map(id => ({
+            user_id: currentUser.id,
+            content_id: stringToUUID(id),
+            content_type: 'theory',
+            content_title: id // 儲存原始字串 ID，方便後續查詢
+          }));
+          await supabase.from('content_likes').insert(rows);
+        }
+
+        if (toRemoveIds.length > 0) {
+          await supabase.from('content_likes')
+            .delete()
+            .eq('user_id', currentUser.id)
+            .in('id', toRemoveIds);
+        }
+      } catch (err) {
+        console.warn('[Auth] 同步按讚到 Supabase 失敗:', err);
+      }
+    }, 1000);
+  }
+
+  let _bookmarkSyncTimer = null;
+  let _lastBookmarkIds = null;
+
+  async function syncBookmarksToSupabase(ids) {
+    if (!currentUser || !supabase) return;
+    const idsStr = JSON.stringify(ids.slice().sort());
+    if (idsStr === _lastBookmarkIds) return;
+    _lastBookmarkIds = idsStr;
+
+    clearTimeout(_bookmarkSyncTimer);
+    _bookmarkSyncTimer = setTimeout(async () => {
+      try {
+        // 讀取現有的收藏記錄
+        const { data: existing } = await supabase
+          .from('content_bookmarks')
+          .select('id,content_id,content_title')
+          .eq('user_id', currentUser.id);
+
+        const existingMap = {};
+        (existing || []).forEach(r => {
+          const origId = r.content_title || r.content_id;
+          existingMap[origId] = r.id;
+        });
+        const existingOrigIds = Object.keys(existingMap);
+
+        const toAdd = ids.filter(id => !existingOrigIds.includes(id));
+        const toRemoveIds = existingOrigIds
+          .filter(origId => !ids.includes(origId))
+          .map(origId => existingMap[origId]);
+
+        if (toAdd.length > 0) {
+          const rows = toAdd.map(id => ({
+            user_id: currentUser.id,
+            content_id: stringToUUID(id),
+            content_type: 'theory',
+            content_title: id // 儲存原始字串 ID
+          }));
+          await supabase.from('content_bookmarks').insert(rows);
+        }
+
+        if (toRemoveIds.length > 0) {
+          await supabase.from('content_bookmarks')
+            .delete()
+            .eq('user_id', currentUser.id)
+            .in('id', toRemoveIds);
+        }
+      } catch (err) {
+        console.warn('[Auth] 同步收藏到 Supabase 失敗:', err);
+      }
+    }, 1000);
+  }
+
+  // ==================== 字串 ID 轉換為確定性 UUID ====================
+  // 將如 'thales-water' 這樣的字串 ID 轉換為 UUID 格式
+  function stringToUUID(str) {
+    // 简單的 hash 函數，產生確定性的 UUID v4 格式
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // 32-bit integer
+    }
+    // 將 hash 轉換為 UUID 格式
+    const h = Math.abs(hash).toString(16).padStart(8, '0');
+    const h2 = Math.abs(hash * 1234567).toString(16).padStart(8, '0');
+    const h3 = Math.abs(hash * 9876543).toString(16).padStart(8, '0');
+    const h4 = Math.abs(hash * 1111111).toString(16).padStart(8, '0');
+    return `${h.slice(0,8)}-${h2.slice(0,4)}-4${h3.slice(0,3)}-${h4.slice(0,4)}-${h.slice(0,4)}${h2.slice(0,8)}`;
+  }
+
+  function getContentTitle(id) {
+    try {
+      const philosophers = JSON.parse(localStorage.getItem('philosophy_philosophers') || '[]');
+      for (const phil of philosophers) {
+        if (phil.theories) {
+          for (const theory of phil.theories) {
+            if (theory.id === id) return theory.title || id;
+          }
+        }
+      }
+    } catch (e) {}
+    return id;
+  }
+
   // ==================== 修復 baseCount:128 硬編碼問題 ====================
-  // ArgumentDetail.tsx 中 baseCount:128（讚）和 baseCount:56（收藏）是硬編碼的
-  // 需要在 DOM 渲染後，將顯示的數字改為正確值（0 + isLiked?1:0）
   function fixHardcodedLikeCounts() {
     function doFix() {
-      // 找到論證詳情頁的按讚/收藏按鈕
-      // getLikeCount(128, id) 顯示 "128" 或 "129"
-      // 我們需要找到這些按鈕並修正顯示
       const allButtons = document.querySelectorAll('button');
       allButtons.forEach(btn => {
         const spans = btn.querySelectorAll('span');
         spans.forEach(span => {
           const text = span.textContent?.trim();
-          // 如果顯示 128, 129, 56, 57 這些異常值，修正為正確值
           if (text === '128' || text === '129') {
-            // 判斷是否已按讚
             const isLiked = btn.classList.contains('text-red-500') ||
                            btn.querySelector('.text-red-500') !== null;
             span.textContent = isLiked ? '1' : '0';
@@ -214,9 +389,7 @@
       });
     }
 
-    // 持續監控 DOM 變化
     const obs = new MutationObserver(() => {
-      // 只在有 128/129/56/57 的情況下修正
       const body = document.body?.textContent || '';
       if (body.includes('128') || body.includes('129') || body.includes('56') || body.includes('57')) {
         setTimeout(doFix, 50);
@@ -235,7 +408,6 @@
   // ==================== 初始化按讚/收藏同步 ====================
   function initLikesSync() {
     try {
-      // 合併兩個系統的資料（取聯集），以 likes 為主
       const likes = JSON.parse(localStorage.getItem('likes') || '[]');
       const likedTheories = JSON.parse(localStorage.getItem('likedTheories') || '[]');
       const bookmarks = JSON.parse(localStorage.getItem('bookmarks') || '[]');
@@ -250,6 +422,115 @@
       orig('bookmarks', JSON.stringify(mergedBookmarks));
       orig('bookmarkedTheories', JSON.stringify(mergedBookmarks));
     } catch (e) {}
+  }
+
+  // ==================== 後台地區同步到前台 ====================
+  function injectExtraRegions() {
+    const HARDCODED_REGIONS = ['western', 'eastern', 'indian', 'islamic'];
+
+    function getExtraRegions() {
+      try {
+        const regions = JSON.parse(localStorage.getItem('philosophy_regions') || '[]');
+        return regions.filter(r => !HARDCODED_REGIONS.includes(r.id));
+      } catch (e) { return []; }
+    }
+
+    function escHtml(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function createRegionCard(region) {
+      const card = document.createElement('div');
+      card.setAttribute('data-injected-region', region.id);
+      card.style.cssText = 'cursor:pointer;';
+
+      const colors = [
+        'from-purple-500/20 to-pink-500/20',
+        'from-teal-500/20 to-cyan-500/20',
+        'from-yellow-500/20 to-amber-500/20',
+        'from-rose-500/20 to-red-500/20'
+      ];
+      const color = colors[Math.abs((region.name || '').charCodeAt(0) || 0) % colors.length];
+
+      card.innerHTML = `
+        <div class="group relative bg-gradient-to-b from-[#111] to-[#0a0a0a] border border-[#c9a86c]/10 rounded-xl p-6 hover:border-[#c9a86c]/30 transition-all duration-300 hover:-translate-y-2 h-full overflow-hidden" style="min-height:200px;">
+          <div class="absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+          <div class="relative z-10">
+            <div class="flex items-center gap-4 mb-4">
+              <div class="w-14 h-14 rounded-xl bg-[#c9a86c]/10 flex items-center justify-center group-hover:bg-[#c9a86c]/20 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-[#c9a86c]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+              </div>
+              <div>
+                <h3 class="text-2xl font-serif text-white group-hover:text-[#c9a86c] transition-colors">${escHtml(region.name)}</h3>
+                <p class="text-white/40 text-sm">${escHtml(region.nameEn || region.name)}</p>
+              </div>
+            </div>
+            <p class="text-white/60 text-sm leading-relaxed mb-4">${escHtml(region.description || '')}</p>
+            <div class="flex items-center text-[#c9a86c] text-sm mt-4">
+              <span>探索該地區</span>
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 ml-2 opacity-0 group-hover:opacity-100 transform group-hover:translate-x-1 transition-all" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </div>
+          </div>
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        const regionId = region.id;
+        try {
+          window.history.pushState({}, '', `/region/${regionId}`);
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        } catch (e) {
+          window.location.hash = `/region/${regionId}`;
+        }
+      });
+
+      return card;
+    }
+
+    function tryInjectRegions() {
+      const extraRegions = getExtraRegions();
+      if (extraRegions.length === 0) return;
+
+      // 找到地區卡片容器：包含 /region/ 連結的 grid
+      const allLinks = document.querySelectorAll('a[href*="/region/"]');
+      if (allLinks.length === 0) return;
+
+      // 找到包含這些連結的 grid 容器
+      let container = null;
+      for (const link of allLinks) {
+        const parent = link.closest('.grid, [class*="grid-cols"]');
+        if (parent) { container = parent; break; }
+      }
+
+      if (!container) {
+        // 備用：找到第一個連結的父容器
+        const firstLink = allLinks[0];
+        container = firstLink.parentElement?.parentElement?.parentElement;
+      }
+
+      if (!container) return;
+
+      extraRegions.forEach(region => {
+        if (container.querySelector(`[data-injected-region="${region.id}"]`)) return;
+        const card = createRegionCard(region);
+        container.appendChild(card);
+      });
+    }
+
+    const obs = new MutationObserver(() => {
+      if (document.querySelector('a[href*="/region/"]')) {
+        setTimeout(tryInjectRegions, 100);
+      }
+    });
+
+    function start() {
+      obs.observe(document.body, { childList: true, subtree: true });
+      window.addEventListener('popstate', () => setTimeout(tryInjectRegions, 200));
+      [500, 1000, 2000, 3000].forEach(t => setTimeout(tryInjectRegions, t));
+    }
+
+    if (document.body) start();
+    else document.addEventListener('DOMContentLoaded', start);
   }
 
   // ==================== 攔截 React Navbar 的登入/登出按鈕 ====================
@@ -397,7 +678,7 @@
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
     overlay.innerHTML = `
       <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:32px;width:100%;max-width:400px;position:relative;">
-        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">✕</button>
+        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">&#x2715;</button>
         <h2 style="color:#d4af37;font-size:20px;margin-bottom:24px;text-align:center;">登入</h2>
         <div id="auth-error" style="display:none;background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);color:#f44336;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;"></div>
         <div style="margin-bottom:16px;">
@@ -406,7 +687,7 @@
         </div>
         <div style="margin-bottom:24px;">
           <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">密碼</label>
-          <input id="auth-password" type="password" placeholder="••••••••" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
+          <input id="auth-password" type="password" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
         </div>
         <button onclick="doLogin()" style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:12px;">登入</button>
         <p style="text-align:center;color:#888;font-size:13px;">還沒有帳號？<a href="#" onclick="window.showRegisterModal();return false;" style="color:#d4af37;text-decoration:none;">立即註冊</a></p>
@@ -439,7 +720,7 @@
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
     overlay.innerHTML = `
       <div style="background:#1a1a1a;border:1px solid rgba(212,175,55,0.3);border-radius:16px;padding:32px;width:100%;max-width:400px;position:relative;">
-        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">✕</button>
+        <button onclick="document.getElementById('auth-modal-overlay').remove()" style="position:absolute;top:12px;right:16px;background:none;border:none;color:#888;font-size:20px;cursor:pointer;">&#x2715;</button>
         <h2 style="color:#d4af37;font-size:20px;margin-bottom:24px;text-align:center;">註冊</h2>
         <div id="reg-error" style="display:none;background:rgba(244,67,54,0.1);border:1px solid rgba(244,67,54,0.3);color:#f44336;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;"></div>
         <div style="margin-bottom:16px;">
@@ -452,7 +733,7 @@
         </div>
         <div style="margin-bottom:24px;">
           <label style="display:block;font-size:13px;color:#888;margin-bottom:6px;">密碼（至少 6 位）</label>
-          <input id="reg-password" type="password" placeholder="••••••••" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
+          <input id="reg-password" type="password" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" style="width:100%;padding:10px 14px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#fff;font-size:14px;outline:none;box-sizing:border-box;" />
         </div>
         <button onclick="doRegister()" style="width:100%;padding:12px;background:linear-gradient(135deg,#d4af37,#a68c2f);color:#1a1a1a;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:12px;">註冊</button>
         <p style="text-align:center;color:#888;font-size:13px;">已有帳號？<a href="#" onclick="window.showLoginModal();return false;" style="color:#d4af37;text-decoration:none;">立即登入</a></p>
@@ -486,7 +767,7 @@
       error: { bg: '#3a1a1a', border: '#f44336', text: '#f44336' }
     };
     const c = colors[type] || { bg: '#1a2a3a', border: '#2196f3', text: '#2196f3' };
-    toast.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:99998;background:${c.bg};border:1px solid ${c.border};color:${c.text};white-space:nowrap;`;
+    toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;z-index:99998;background:' + c.bg + ';border:1px solid ' + c.border + ';color:' + c.text + ';white-space:nowrap;';
     toast.textContent = msg;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
@@ -498,6 +779,7 @@
     init();
     interceptNavbarButtons();
     fixHardcodedLikeCounts();
+    injectExtraRegions();
   }
 
   if (document.readyState === 'loading') {

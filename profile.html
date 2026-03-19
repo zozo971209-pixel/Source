@@ -77,6 +77,13 @@
   </style>
 </head>
 <body>
+  <!-- 載入動畫：在 session 初始化完成前顯示 -->
+  <div id="page-loading" style="position:fixed;inset:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;">
+    <div style="color:#d4af37;font-size:32px;font-weight:700;margin-bottom:20px;">&#28304;</div>
+    <div style="width:40px;height:40px;border:3px solid rgba(212,175,55,0.2);border-top-color:#d4af37;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+    <p style="color:#888;font-size:13px;margin-top:16px;">載入中...</p>
+  </div>
+  <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
   <nav class="nav">
     <a href="./" class="nav-logo">源</a>
     <div class="nav-links">
@@ -173,6 +180,21 @@
     const SB_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
     let sb = null, user = null, userProfile = null;
 
+    // 從 localStorage 讀取所有理論，返回 { id: { title, philosopher } } 的對映
+    function getTheoriesFromLocal() {
+      const map = {};
+      try {
+        const philosophers = JSON.parse(localStorage.getItem('philosophy_philosophers') || '[]');
+        for (const phil of philosophers) {
+          if (!phil.theories) continue;
+          for (const theory of phil.theories) {
+            map[theory.id] = { title: theory.title || theory.id, philosopher: phil.name || '' };
+          }
+        }
+      } catch (e) {}
+      return map;
+    }
+
     async function init() {
       await new Promise(r => {
         if (window.supabase && window.supabase.createClient) { r(); return; }
@@ -211,6 +233,9 @@
         }
       }
 
+      // 隱藏載入動畫
+      document.getElementById('page-loading').style.display = 'none';
+
       if (!session) { document.getElementById('not-logged-in').style.display = 'block'; return; }
       user = session.user;
       document.getElementById('profile-content').style.display = 'block';
@@ -236,8 +261,12 @@
         sb.from('content_bookmarks').select('id', { count: 'exact', head: true }).eq('user_id', user.id)
       ]);
       document.getElementById('stat-submissions').textContent = subsR.count || 0;
-      document.getElementById('stat-likes-given').textContent = likesGivenR.count || 0;
-      document.getElementById('stat-bookmarks').textContent = bookmarksR.count || 0;
+      // 如果 Supabase 計數為 0，嘗試從 localStorage 讀取
+      let localLikesCount = 0, localBookmarksCount = 0;
+      try { localLikesCount = JSON.parse(localStorage.getItem('likes') || localStorage.getItem('likedTheories') || '[]').length; } catch(e) {}
+      try { localBookmarksCount = JSON.parse(localStorage.getItem('bookmarks') || localStorage.getItem('bookmarkedTheories') || '[]').length; } catch(e) {}
+      document.getElementById('stat-likes-given').textContent = Math.max(likesGivenR.count || 0, localLikesCount);
+      document.getElementById('stat-bookmarks').textContent = Math.max(bookmarksR.count || 0, localBookmarksCount);
       const totalLikes = (subsR.data || []).reduce((s, r) => s + (r.likes_count || 0), 0);
       document.getElementById('stat-likes-received').textContent = totalLikes;
     }
@@ -267,35 +296,83 @@
     async function loadLikes() {
       const { data } = await sb.from('content_likes').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
       const el = document.getElementById('likes-list');
-      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">❤️</div><p>尚未按讚任何內容</p></div>'; return; }
-      el.innerHTML = '<div class="card">' + data.map(l => `
+      if (!data || !data.length) {
+        // Fallback: 從 localStorage 讀取
+        const localLikes = JSON.parse(localStorage.getItem('likes') || localStorage.getItem('likedTheories') || '[]');
+        if (!localLikes.length) { el.innerHTML = '<div class="empty"><div class="icon">❤️</div><p>尚未按讚任何內容</p></div>'; return; }
+        // 從 localStorage.philosophy_philosophers 查找理論標題
+        const theories = getTheoriesFromLocal();
+        el.innerHTML = '<div class="card">' + localLikes.map(id => {
+          const theory = theories[id] || { title: id, philosopher: '' };
+          return `<div class="card-item">
+            <div class="card-item-body">
+              <div class="card-item-title">${esc(theory.title)}</div>
+              <div class="card-item-meta">哲學理論 · ${esc(theory.philosopher)}</div>
+            </div>
+          </div>`;
+        }).join('') + '</div>';
+        document.getElementById('stat-likes-given').textContent = localLikes.length;
+        return;
+      }
+      el.innerHTML = '<div class="card">' + data.map(l => {
+        // content_title 儲存的是原始字串 ID，需要查找對應的理論標題
+        const theories = getTheoriesFromLocal();
+        const origId = l.content_title; // 原始字串 ID
+        const theory = theories[origId] || {};
+        const displayTitle = theory.title || l.content_title || l.content_id;
+        const displayMeta = theory.philosopher ? `哲學理論 · ${theory.philosopher} · ${fmtDate(l.created_at)}` : `${contentTypeLabel(l.content_type)} · ${fmtDate(l.created_at)}`;
+        return `
         <div class="card-item">
           <div class="card-item-body">
-            <div class="card-item-title">${esc(l.content_title || l.content_id)}</div>
-            <div class="card-item-meta">${contentTypeLabel(l.content_type)} · ${fmtDate(l.created_at)}</div>
+            <div class="card-item-title">${esc(displayTitle)}</div>
+            <div class="card-item-meta">${displayMeta}</div>
           </div>
           <div class="card-item-actions">
             <button class="btn btn-danger" style="padding:5px 10px;font-size:12px;" onclick="unlikeItem('${l.id}')">取消按讚</button>
           </div>
         </div>
-      `).join('') + '</div>';
+      `;
+      }).join('') + '</div>';
     }
 
     async function loadBookmarks() {
       const { data } = await sb.from('content_bookmarks').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
       const el = document.getElementById('bookmarks-list');
-      if (!data || !data.length) { el.innerHTML = '<div class="empty"><div class="icon">⭐</div><p>尚未收藏任何內容</p></div>'; return; }
-      el.innerHTML = '<div class="card">' + data.map(b => `
+      if (!data || !data.length) {
+        // Fallback: 從 localStorage 讀取
+        const localBookmarks = JSON.parse(localStorage.getItem('bookmarks') || localStorage.getItem('bookmarkedTheories') || '[]');
+        if (!localBookmarks.length) { el.innerHTML = '<div class="empty"><div class="icon">⭐</div><p>尚未收藏任何內容</p></div>'; return; }
+        const theories = getTheoriesFromLocal();
+        el.innerHTML = '<div class="card">' + localBookmarks.map(id => {
+          const theory = theories[id] || { title: id, philosopher: '' };
+          return `<div class="card-item">
+            <div class="card-item-body">
+              <div class="card-item-title">${esc(theory.title)}</div>
+              <div class="card-item-meta">哲學理論 · ${esc(theory.philosopher)}</div>
+            </div>
+          </div>`;
+        }).join('') + '</div>';
+        document.getElementById('stat-bookmarks').textContent = localBookmarks.length;
+        return;
+      }
+      el.innerHTML = '<div class="card">' + data.map(b => {
+        const theories = getTheoriesFromLocal();
+        const origId = b.content_title;
+        const theory = theories[origId] || {};
+        const displayTitle = theory.title || b.content_title || b.content_id;
+        const displayMeta = theory.philosopher ? `哲學理論 · ${theory.philosopher} · ${fmtDate(b.created_at)}` : `${contentTypeLabel(b.content_type)} · ${fmtDate(b.created_at)}`;
+        return `
         <div class="card-item">
           <div class="card-item-body">
-            <div class="card-item-title">${esc(b.content_title || b.content_id)}</div>
-            <div class="card-item-meta">${contentTypeLabel(b.content_type)} · ${fmtDate(b.created_at)}</div>
+            <div class="card-item-title">${esc(displayTitle)}</div>
+            <div class="card-item-meta">${displayMeta}</div>
           </div>
           <div class="card-item-actions">
             <button class="btn btn-danger" style="padding:5px 10px;font-size:12px;" onclick="unbookmarkItem('${b.id}')">取消收藏</button>
           </div>
         </div>
-      `).join('') + '</div>';
+      `;
+      }).join('') + '</div>';
     }
 
     async function unlikeItem(id) {
