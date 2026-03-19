@@ -166,11 +166,129 @@
     })();
     </script>
     
-    <!-- React 應用 -->
-    <script type="module" crossorigin src="./assets/index-0IGz-JVJ.js?v=20260319-1"></script>
-    
-    <!-- Supabase 認證橋接系統 -->
-    <script src="./assets/auth-supabase.js?v=20260319-1"></script>
+    <!-- 預載入 Supabase 資料，再啟動 React -->
+    <script type="module">
+    (async function preloadSupabaseData() {
+      const SUPABASE_URL = 'https://grccrtpbshfycqicqtyn.supabase.co';
+      const SUPABASE_ANON_KEY = 'sb_publishable_CO27p91THj9K7AZZblVpYg_FKqZRjov';
+      const CACHE_KEY = 'sb_data_cache';
+      const CACHE_TTL = 5 * 60 * 1000; // 5分鐘快取
+
+      // 檢查快取
+      try {
+        const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+        if (cached && (Date.now() - cached.ts) < CACHE_TTL) {
+          applyData(cached);
+          loadReact();
+          return;
+        }
+      } catch(e) {}
+
+      // 從 Supabase 讀取資料
+      try {
+        const headers = {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json'
+        };
+        const [regRes, eraRes, philRes, qRes] = await Promise.all([
+          fetch(SUPABASE_URL + '/rest/v1/regions?select=*&order=created_at', { headers }),
+          fetch(SUPABASE_URL + '/rest/v1/eras?select=*,regions(name)&order=created_at', { headers }),
+          fetch(SUPABASE_URL + '/rest/v1/philosophers?select=*,eras(name,region_id),regions(name)&order=created_at', { headers }),
+          fetch(SUPABASE_URL + '/rest/v1/questions?select=*&order=created_at', { headers })
+        ]);
+        const [regions, eras, philosophers, questions] = await Promise.all([
+          regRes.json(), eraRes.json(), philRes.json(), qRes.json()
+        ]);
+        const data = { ts: Date.now(), regions, eras, philosophers, questions };
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        applyData(data);
+      } catch(err) {
+        console.warn('[Preload] Supabase 預載入失敗:', err);
+      }
+      loadReact();
+
+      function applyData({ regions, eras, philosophers, questions }) {
+        // 地區
+        if (Array.isArray(regions) && regions.length > 0) {
+          const base = JSON.parse(localStorage.getItem('philosophy_regions') || 'null') || [
+            {id:'western',name:'西方哲學',nameEn:'Western Philosophy',description:'從古希臘的理性之光到當代的語言轉向，探索西方思想的演變歷程。'},
+            {id:'eastern',name:'東方哲學',nameEn:'Eastern Philosophy',description:'儒釋道三家並立，探索中國哲學的深邃智慧與人生境界。'},
+            {id:'indian',name:'印度哲學',nameEn:'Indian Philosophy',description:'梵我合一的終極追求，六派正統哲學與佛教思想的深奧體系。'},
+            {id:'islamic',name:'伊斯蘭哲學',nameEn:'Islamic Philosophy',description:'理性與啟示的交匯，阿拉伯哲學的黃金時代與獨特傳統。'}
+          ];
+          const names = base.map(r => r.name);
+          regions.forEach(r => {
+            if (!names.includes(r.name)) {
+              base.push({ id: r.id, name: r.name, nameEn: r.name, description: r.description || '' });
+            }
+          });
+          localStorage.setItem('philosophy_regions', JSON.stringify(base));
+        }
+        // 時代
+        if (Array.isArray(eras) && eras.length > 0) {
+          const base = JSON.parse(localStorage.getItem('philosophy_eras') || 'null') || [];
+          const names = base.map(e => e.title);
+          eras.forEach(era => {
+            if (!names.includes(era.name)) {
+              base.push({
+                id: era.id, period: era.period || '', title: era.name, titleEn: era.name,
+                description: era.description || '', features: era.features || [],
+                philosopherCount: era.philosopher_count || 0,
+                region: era.region_id, regionName: (era.regions && era.regions.name) || ''
+              });
+            }
+          });
+          localStorage.setItem('philosophy_eras', JSON.stringify(base));
+        }
+        // 哲學家
+        if (Array.isArray(philosophers) && philosophers.length > 0) {
+          const base = JSON.parse(localStorage.getItem('philosophy_philosophers') || 'null') || [];
+          const names = base.map(p => p.name);
+          philosophers.forEach(phil => {
+            if (!names.includes(phil.name)) {
+              base.push({
+                id: phil.id, name: phil.name, nameEn: phil.name,
+                birthYear: phil.birth_year || '', deathYear: phil.death_year || '', birthplace: '',
+                era: phil.era_id, eraName: (phil.eras && phil.eras.name) || '',
+                region: phil.region_id, regionName: (phil.regions && phil.regions.name) || '',
+                biography: phil.biography || '', theories: [], works: phil.works || []
+              });
+            }
+          });
+          localStorage.setItem('philosophy_philosophers', JSON.stringify(base));
+        }
+        // 哲學問題
+        if (Array.isArray(questions) && questions.length > 0) {
+          const base = JSON.parse(localStorage.getItem('philosophy_questions') || 'null') || [];
+          const titles = base.map(q => q.title);
+          questions.forEach(q => {
+            if (!titles.includes(q.title)) {
+              base.push({
+                id: q.id, title: q.title, description: q.description || '',
+                category: q.category || '', difficulty: q.difficulty || 'medium',
+                philosophers: [], arguments: []
+              });
+            }
+          });
+          localStorage.setItem('philosophy_questions', JSON.stringify(base));
+        }
+      }
+
+      function loadReact() {
+        // 動態載入 React bundle
+        const s = document.createElement('script');
+        s.type = 'module';
+        s.crossOrigin = '';
+        s.src = './assets/index-0IGz-JVJ.js?v=20260319-2';
+        document.head.appendChild(s);
+        // 載入 auth-supabase.js
+        const a = document.createElement('script');
+        a.src = './assets/auth-supabase.js?v=20260319-2';
+        document.head.appendChild(a);
+      }
+    })();
+    </script>
     
     <!-- 樣式 -->
     <link rel="stylesheet" crossorigin href="./assets/index-DQfQhsIG.css?v=20260319-1">

@@ -199,31 +199,13 @@
   }
 
   // ==================== 更新 theory 的 likes/bookmarks 計數 ====================
+  // 注意：React 的 getLikeCount(baseCount, id) = baseCount + (isLiked ? 1 : 0)
+  // 所以 theory.likes 應該保持為 0（代表「其他人」的按讚數），不要設為 1
+  // 否則會顯示 1+1=2 的重複計數
+  // 此函數只做雙向同步，不修改 theory.likes
   function updateTheoryLikeCounts(likedIds, bookmarkedIds) {
-    try {
-      const philKey = 'philosophy_philosophers';
-      const philData = localStorage.getItem(philKey);
-      if (!philData) return;
-      const philosophers = JSON.parse(philData);
-      let changed = false;
-      philosophers.forEach(phil => {
-        if (!phil.theories) return;
-        phil.theories.forEach(theory => {
-          if (likedIds !== null) {
-            const newLikes = likedIds.includes(theory.id) ? 1 : 0;
-            if (theory.likes !== newLikes) { theory.likes = newLikes; changed = true; }
-          }
-          if (bookmarkedIds !== null) {
-            const newBookmarks = bookmarkedIds.includes(theory.id) ? 1 : 0;
-            if (theory.bookmarks !== newBookmarks) { theory.bookmarks = newBookmarks; changed = true; }
-          }
-        });
-      });
-      if (changed) {
-        const orig = localStorage.setItem.bind(localStorage);
-        orig(philKey, JSON.stringify(philosophers));
-      }
-    } catch(e) {}
+    // 不修改 philosophy_philosophers 中的 likes/bookmarks 數字
+    // React 的 getLikeCount 會自動加上當前用戶的按讚
   }
 
   // ==================== 從 Supabase 同步後台內容到前台 ====================
